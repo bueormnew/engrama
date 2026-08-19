@@ -58,20 +58,30 @@ class MultiCandidateEvoker(nn.Module):
             Tensor: Unnormalized token logits of shape (B, N, vocab_size) or (B, vocab_size).
         """
         is_3d = h_star.dim() == 3
-        if is_3d:
-            c = torch.stack([cand(h_star) for cand in self.candidates], dim=2)
-        else:
-            c = torch.stack([cand(h_star) for cand in self.candidates], dim=1)
-
-        sim = F.linear(c, embedding_weights) / math.sqrt(self.d_model)
+        scale = 1.0 / math.sqrt(self.d_model)
 
         if self.aggregation == "logsumexp":
-            logits = torch.logsumexp(sim, dim=-2)
+            logits_list = [
+                F.linear(cand(h_star), embedding_weights) * scale
+                for cand in self.candidates
+            ]
+            max_logits = logits_list[0]
+            for l_c in logits_list[1:]:
+                max_logits = torch.maximum(max_logits, l_c)
+            sum_exp = torch.zeros_like(max_logits)
+            for l_c in logits_list:
+                sum_exp = sum_exp + torch.exp(l_c - max_logits)
+            return max_logits + torch.log(sum_exp)
         elif self.aggregation == "max":
-            logits = torch.max(sim, dim=-2).values
+            max_logits = None
+            for cand in self.candidates:
+                l_c = F.linear(cand(h_star), embedding_weights) * scale
+                max_logits = l_c if max_logits is None else torch.maximum(max_logits, l_c)
+            return max_logits
         elif self.aggregation == "mean":
-            logits = torch.mean(sim, dim=-2)
+            sum_logits = torch.zeros_like(F.linear(self.candidates[0](h_star), embedding_weights))
+            for cand in self.candidates:
+                sum_logits = sum_logits + F.linear(cand(h_star), embedding_weights) * scale
+            return sum_logits / self.num_candidates
         else:
             raise ValueError(f"Unknown aggregation method: {self.aggregation}")
-
-        return logits
