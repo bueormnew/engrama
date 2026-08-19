@@ -34,30 +34,9 @@ class EngramaModel(nn.Module):
         super().__init__()
         self.config = config
         self.embeddings = nn.Embedding(config.vocab_size, config.d_model)
-        self.encoder = IsolatedEncoder(
-            d_model=config.d_model,
-            d_gate=config.d_gate,
-            num_cells=config.num_cells,
-            num_encoder_layers=config.num_encoder_layers,
-            d_ff=config.d_ff,
-            dropout=config.dropout,
-            activation=config.activation,
-        )
-        self.consolidation = ConsolidationStack(
-            d_model=config.d_model,
-            d_gate=config.d_gate,
-            offsets=config.offsets,
-            num_consolidation_layers=config.num_consolidation_layers,
-            d_ff=config.d_ff,
-            dropout=config.dropout,
-            activation=config.activation,
-        )
-        self.evoker = MultiCandidateEvoker(
-            d_model=config.d_model,
-            vocab_size=config.vocab_size,
-            num_candidates=config.num_candidates,
-            aggregation=config.candidate_aggregation,
-        )
+        self.encoder = IsolatedEncoder(config)
+        self.consolidation = ConsolidationStack(config)
+        self.evoker = MultiCandidateEvoker(config)
         self._cache: Optional[EngramaCache] = None
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:

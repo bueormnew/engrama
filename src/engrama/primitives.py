@@ -109,7 +109,7 @@ class FactorizedSynapse(nn.Module):
         self.s = nn.Parameter(torch.randn(rank) * 0.01)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
-        transformed = (h @ self.V) @ torch.diag(self.s) @ self.U.T
+        transformed = (h @ self.V.T) @ torch.diag(self.s) @ self.U.T
         if self.identity_transport:
             return self.beta * h + transformed
         return transformed

@@ -38,6 +38,7 @@ class EngramaConfig:
         global_anchor (bool): Whether to include a deterministic global anchor offset g(N) at final layer. Default: False.
         evoker_mode (str): Evoker candidate projection mode ('dense', 'factorized'). Default: 'factorized'.
         hierarchical_cache (bool): Minimum horizon trace cache pruning for V3. Default: True.
+        hierarchical_gate (bool): Enables hierarchical gating in PositionalDilatedMix. Default: True.
     """
 
     vocab_size: int = 256
@@ -64,6 +65,7 @@ class EngramaConfig:
     global_anchor: bool = False
     evoker_mode: str = "factorized"
     hierarchical_cache: bool = True
+    hierarchical_gate: bool = True
 
     def __post_init__(self) -> None:
         if self.offsets is None:

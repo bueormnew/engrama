@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from engrama.primitives import FactorizedSynapse
+from engrama.config import EngramaConfig
 
 
 class FactorizedEvokerCandidate(nn.Module):
@@ -75,4 +76,4 @@ class MultiCandidateEvoker(nn.Module):
             summed = torch.sum(torch.stack(candidate_logits, dim=-1), dim=-1)
             return summed / self.num_candidates
         else:
-            raise ValueError(f"Unknown aggregation: {self.aggregation}")}}
+            raise ValueError(f"Unknown aggregation: {self.aggregation}")

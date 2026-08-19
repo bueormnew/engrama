@@ -3,6 +3,7 @@ import torch
 from torch import nn
 
 from engrama.primitives import Cell
+from engrama.config import EngramaConfig
 
 
 class PositionalDilatedMix(nn.Module):
@@ -153,22 +154,23 @@ class PositionalDilatedMix(nn.Module):
 class ConsolidationLayer(nn.Module):
     def __init__(
         self,
-        d_model: int,
-        d_gate: int,
-        offsets: List[int],
-        d_ff: int,
-        dropout: float = 0.0,
-        activation: str = "gelu",
-        synapse_mode: str = "factorized",
-        synapse_rank: int = 32,
-        identity_transport: bool = True,
-        hierarchical_gate: bool = True,
+        config: EngramaConfig,
+        layer_idx: int,
     ):
         super().__init__()
+        offsets = config.get_layer_offsets(layer_idx, config.num_consolidation_layers)
         self.mix = PositionalDilatedMix(
-            d_model, d_gate, offsets, synapse_mode, synapse_rank, identity_transport, hierarchical_gate
+            config.d_model,
+            config.d_gate,
+            offsets,
+            config.synapse_mode,
+            config.synapse_rank,
+            config.identity_transport,
+            config.hierarchical_gate,
         )
-        self.cell = Cell(d_model, d_ff, dropout, activation)
+        self.cell = Cell(
+            config.d_model, config.d_ff, config.dropout, config.activation
+        )
         self.max_offset = max(offsets) if offsets else 0
 
     def forward_train(self, T_prev: torch.Tensor) -> torch.Tensor:
@@ -202,18 +204,7 @@ class ConsolidationStack(nn.Module):
         self.config = config
         self.layers = nn.ModuleList(
             [
-                ConsolidationLayer(
-                    d_model=config.d_model,
-                    d_gate=config.d_gate,
-                    offsets=config.get_layer_offsets(i, config.num_consolidation_layers),
-                    d_ff=config.d_ff,
-                    dropout=config.dropout,
-                    activation=config.activation,
-                    synapse_mode=config.synapse_mode,
-                    synapse_rank=config.synapse_rank,
-                    identity_transport=config.identity_transport,
-                    hierarchical_gate=config.hierarchical_gate,
-                )
+                ConsolidationLayer(config, i)
                 for i in range(config.num_consolidation_layers)
             ]
         )

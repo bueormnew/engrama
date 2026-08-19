@@ -2,28 +2,22 @@ import unittest
 import torch
 from engrama.encoder import IsolatedEncoder
 from engrama.trace import EngramaCache
+from engrama.config import EngramaConfig
 
 
 class TestIsolatedEncoder(unittest.TestCase):
     def test_forward_shape(self):
-        batch_size = 2
-        seq_len = 8
-        d_model = 32
-        d_gate = 8
-        num_cells = 4
-        num_layers = 2
-        d_ff = 64
-
-        encoder = IsolatedEncoder(
-            d_model=d_model,
-            d_gate=d_gate,
-            num_cells=num_cells,
-            num_encoder_layers=num_layers,
-            d_ff=d_ff,
+        config = EngramaConfig(
+            d_model=32,
+            d_gate=8,
+            num_cells=4,
+            num_encoder_layers=2,
+            d_ff=64,
         )
-        x = torch.randn(batch_size, seq_len, d_model)
+        encoder = IsolatedEncoder(config)
+        x = torch.randn(2, 8, 32)
         out = encoder(x)
-        self.assertEqual(out.shape, (batch_size, seq_len, d_model))
+        self.assertEqual(out.shape, (2, 8, 32))
 
 
 class TestEngramaCache(unittest.TestCase):

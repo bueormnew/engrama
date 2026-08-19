@@ -73,6 +73,10 @@ class EngramaCache:
     def __len__(self) -> int:
         return len(self.T0)
 
+    def absolute_index(self) -> int:
+        """Return the current absolute sequence position (cache length)."""
+        return len(self.T0)
+
     def __repr__(self) -> str:
         return (
             f"EngramaCache(len={len(self)}, N_max={self.N_max}, "
