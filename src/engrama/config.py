@@ -28,8 +28,16 @@ class EngramaConfig:
         activation (str): Activation function for Cells ('gelu', 'relu', 'silu'). Default: 'gelu'.
         dropout (float): Dropout probability. Default: 0.0.
         dtype (str): Tensor precision format. Default: 'float32'.
-        version (str): Architecture version specification ('v1', 'v2'). Default: 'v2'.
+        version (str): Architecture version specification ('v1', 'v2', 'v3'). Default: 'v3'.
         tie_embeddings (bool): Whether Evoker weights tie with input embeddings. Default: True.
+        synapse_mode (str): Synapse routing mode ('dense', 'factorized'). Default: 'factorized'.
+        synapse_rank (int): Low-rank dimension for factorized synapses (r << d_model). Default: 32.
+        identity_transport (bool): Enables explicit identity transport path in synapses. Default: True.
+        cell_mode (str): Cellular non-linear transformation mode ('independent', 'shared_core'). Default: 'shared_core'.
+        offset_mode (str): Consolidation positional offset scheme ('dense_dilated', 'hierarchical_dyadic', 'binary_minimal'). Default: 'hierarchical_dyadic'.
+        global_anchor (bool): Whether to include a deterministic global anchor offset g(N) at final layer. Default: False.
+        evoker_mode (str): Evoker candidate projection mode ('dense', 'factorized'). Default: 'factorized'.
+        hierarchical_cache (bool): Minimum horizon trace cache pruning for V3. Default: True.
     """
 
     vocab_size: int = 256
@@ -46,8 +54,16 @@ class EngramaConfig:
     activation: str = "gelu"
     dropout: float = 0.0
     dtype: str = "float32"
-    version: str = "v2"
+    version: str = "v3"
     tie_embeddings: bool = True
+    synapse_mode: str = "factorized"
+    synapse_rank: int = 32
+    identity_transport: bool = True
+    cell_mode: str = "shared_core"
+    offset_mode: str = "hierarchical_dyadic"
+    global_anchor: bool = False
+    evoker_mode: str = "factorized"
+    hierarchical_cache: bool = True
 
     def __post_init__(self) -> None:
         if self.offsets is None:
@@ -62,10 +78,59 @@ class EngramaConfig:
             raise ValueError("candidate_aggregation must be 'max', 'logsumexp', or 'mean'")
         if self.activation not in ("gelu", "relu", "silu"):
             raise ValueError("activation must be 'gelu', 'relu', or 'silu'")
-        if self.version not in ("v1", "v2"):
-            raise ValueError("version must be 'v1' or 'v2'")
+        if self.version not in ("v1", "v2", "v3"):
+            raise ValueError("version must be 'v1', 'v2', or 'v3'")
+        if self.synapse_mode not in ("dense", "factorized"):
+            raise ValueError("synapse_mode must be 'dense' or 'factorized'")
+        if self.cell_mode not in ("independent", "shared_core"):
+            raise ValueError("cell_mode must be 'independent' or 'shared_core'")
+        if self.offset_mode not in ("dense_dilated", "hierarchical_dyadic", "binary_minimal"):
+            raise ValueError("offset_mode must be 'dense_dilated', 'hierarchical_dyadic', or 'binary_minimal'")
+        if self.evoker_mode not in ("dense", "factorized"):
+            raise ValueError("evoker_mode must be 'dense' or 'factorized'")
         if any(o < 0 for o in self.offsets):
             raise ValueError("All positional offsets must be non-negative (>= 0)")
+        
+        # When version is v1 or v2, adjust defaults if not explicitly set to v3 modes
+        if self.version in ("v1", "v2"):
+            # V1/V2 backward compatibility adjustments if legacy defaults are intended
+            pass
+
+    def get_layer_offsets(
+        self, layer_idx: int, total_layers: Optional[int] = None
+    ) -> List[int]:
+        """Get positional relative offsets D_l for a specific consolidation layer l."""
+        if total_layers is None:
+            total_layers = self.num_consolidation_layers
+
+        if self.offset_mode == "dense_dilated":
+            res = list(self.offsets)
+        elif self.offset_mode == "hierarchical_dyadic":
+            if layer_idx == 0:
+                res = [0, 1]
+            else:
+                dyadic = 2 ** layer_idx
+                if dyadic < self.context_length:
+                    res = [0, 1, dyadic]
+                else:
+                    res = [0, 1]
+        elif self.offset_mode == "binary_minimal":
+            dyadic = 2 ** layer_idx
+            if dyadic < self.context_length:
+                res = [0, dyadic]
+            else:
+                res = [0, 1]
+        else:
+            res = list(self.offsets)
+
+        if self.global_anchor and layer_idx == total_layers - 1:
+            anchor = self.context_length - 1
+            if anchor > 0 and anchor not in res:
+                res.append(anchor)
+
+        # Deduplicate and sort
+        unique_offsets = sorted(list(dict.fromkeys(res)))
+        return unique_offsets
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""

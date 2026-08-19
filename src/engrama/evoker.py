@@ -1,87 +1,78 @@
-"""
-ENGRAMA Multi-Candidate Evoker Module (Phase 4)
-Author: BUEORM
-License: AGPL-3.0
-"""
-
 import math
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
+from engrama.primitives import FactorizedSynapse
+
+
+class FactorizedEvokerCandidate(nn.Module):
+    def __init__(self, d_model: int, rank: int):
+        super().__init__()
+        self.d_model = d_model
+        self.rank = rank
+
+        self.W_shared = nn.Linear(d_model, d_model, bias=False)
+        self.U_e = nn.Parameter(torch.randn(d_model, rank) * 0.01)
+        self.V_e = nn.Parameter(torch.randn(rank, d_model) * 0.01)
+        self.s_m = nn.Parameter(torch.randn(rank) * 0.01)
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        lr_part = (h @ self.V_e.T) @ torch.diag(self.s_m) @ self.U_e.T
+        return self.W_shared(h) + lr_part
+
 
 class MultiCandidateEvoker(nn.Module):
-    """ENGRAMA Multi-Candidate Memory Evoker (Phase 4).
-
-    Generates M distinct candidate projections from final consolidated representations
-    h* and aggregates token logits using LogSumExp, Max, or Mean over candidate similarity scores.
-
-    Args:
-        d_model (int): Hidden dimension size.
-        vocab_size (int): Output vocabulary size.
-        num_candidates (int): Number of recall candidates M (1 <= M <= 8).
-        aggregation (str): Aggregation function ('logsumexp', 'max', 'mean').
-    """
-
     def __init__(
         self,
-        d_model: int,
-        vocab_size: int,
-        num_candidates: int = 4,
-        aggregation: str = "logsumexp",
+        config: EngramaConfig,
     ):
         super().__init__()
-        if not (1 <= num_candidates <= 8):
-            raise ValueError("num_candidates must be between 1 and 8 inclusive")
-        if aggregation.lower() not in ("max", "logsumexp", "mean"):
-            raise ValueError("aggregation must be 'max', 'logsumexp', or 'mean'")
+        self.d_model = config.d_model
+        self.vocab_size = config.vocab_size
+        self.num_candidates = config.num_candidates
+        self.aggregation = config.candidate_aggregation
+        self.evoker_mode = config.evoker_mode
+        self.synapse_rank = config.synapse_rank
 
-        self.d_model = d_model
-        self.vocab_size = vocab_size
-        self.num_candidates = num_candidates
-        self.aggregation = aggregation.lower()
-        self.candidates = nn.ModuleList(
-            [nn.Linear(d_model, d_model) for _ in range(num_candidates)]
-        )
+        if config.evoker_mode == "factorized":
+            self.candidates = nn.ModuleList(
+                [
+                    FactorizedEvokerCandidate(config.d_model, config.synapse_rank)
+                    for _ in range(config.num_candidates)
+                ]
+            )
+        else:
+            self.candidates = nn.ModuleList(
+                [nn.Linear(config.d_model, config.d_model) for _ in range(config.num_candidates)]
+            )
 
     def forward(
         self, h_star: torch.Tensor, embedding_weights: torch.Tensor
     ) -> torch.Tensor:
-        """Forward pass to compute aggregated vocabulary logits.
-
-        Args:
-            h_star (Tensor): Consolidated hidden representation (B, N, D) or (B, D).
-            embedding_weights (Tensor): Vocabulary embedding weight matrix (vocab_size, D).
-
-        Returns:
-            Tensor: Unnormalized token logits of shape (B, N, vocab_size) or (B, vocab_size).
-        """
         is_3d = h_star.dim() == 3
         scale = 1.0 / math.sqrt(self.d_model)
+        candidate_logits = []
+
+        for cand in self.candidates:
+            if self.evoker_mode == "factorized":
+                c_m = cand(h_star)
+            else:
+                c_m = cand(h_star)
+            logits = F.linear(c_m, embedding_weights) * scale
+            candidate_logits.append(logits)
 
         if self.aggregation == "logsumexp":
-            logits_list = [
-                F.linear(cand(h_star), embedding_weights) * scale
-                for cand in self.candidates
-            ]
-            max_logits = logits_list[0]
-            for l_c in logits_list[1:]:
-                max_logits = torch.maximum(max_logits, l_c)
-            sum_exp = torch.zeros_like(max_logits)
-            for l_c in logits_list:
-                sum_exp = sum_exp + torch.exp(l_c - max_logits)
+            stacked = torch.stack(candidate_logits, dim=-1)
+            max_logits = stacked.max(dim=-1).values
+            sum_exp = torch.sum(torch.exp(stacked - max_logits.unsqueeze(-1)), dim=-1)
             return max_logits + torch.log(sum_exp)
         elif self.aggregation == "max":
-            max_logits = None
-            for cand in self.candidates:
-                l_c = F.linear(cand(h_star), embedding_weights) * scale
-                max_logits = l_c if max_logits is None else torch.maximum(max_logits, l_c)
-            return max_logits
+            return torch.stack(candidate_logits, dim=-1).max(dim=-1).values
         elif self.aggregation == "mean":
-            sum_logits = torch.zeros_like(F.linear(self.candidates[0](h_star), embedding_weights))
-            for cand in self.candidates:
-                sum_logits = sum_logits + F.linear(cand(h_star), embedding_weights) * scale
-            return sum_logits / self.num_candidates
+            summed = torch.sum(torch.stack(candidate_logits, dim=-1), dim=-1)
+            return summed / self.num_candidates
         else:
-            raise ValueError(f"Unknown aggregation method: {self.aggregation}")
+            raise ValueError(f"Unknown aggregation: {self.aggregation}")}}

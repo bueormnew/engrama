@@ -1,11 +1,4 @@
-"""
-ENGRAMA Consolidation Module (Phase 3)
-Author: BUEORM
-License: AGPL-3.0
-"""
-
 from typing import Any, List, Optional, Tuple, Union
-
 import torch
 from torch import nn
 
@@ -13,27 +6,26 @@ from engrama.primitives import Cell
 
 
 class PositionalDilatedMix(nn.Module):
-    """Positional Dilated Gated Mixing layer.
-
-    Combines representations across exponential positional offsets P_l(i) = [0, 1, 2, 4, 8, ...]
-    using relative dynamic gating projections without dynamic QK^T matrix operations.
-
-    Args:
-        d_model (int): Hidden dimension size.
-        d_gate (int): Gate projection size (d_gate < d_model).
-        offsets (List[int]): Powers of 2 relative offsets.
-    """
-
-    def __init__(self, d_model: int, d_gate: int, offsets: List[int]):
+    def __init__(
+        self,
+        d_model: int,
+        d_gate: int,
+        offsets: List[int],
+        synapse_mode: str = "factorized",
+        synapse_rank: int = 32,
+        identity_transport: bool = True,
+        hierarchical_gate: bool = True,
+    ):
         super().__init__()
         self.d_model = d_model
         self.d_gate = d_gate
         self.offsets = list(offsets)
+        self.synapse_mode = synapse_mode
+        self.synapse_rank = synapse_rank
+        self.identity_transport = identity_transport
+        self.hierarchical_gate = hierarchical_gate
 
         self.p_g = nn.Linear(d_model, d_gate, bias=False)
-        self.w_offsets = nn.ModuleDict(
-            {str(p): nn.Linear(d_model, d_model, bias=False) for p in self.offsets}
-        )
         self.gate_w = nn.ParameterDict(
             {
                 str(p): nn.Parameter(torch.randn(d_gate, d_model) * 0.01)
@@ -44,8 +36,55 @@ class PositionalDilatedMix(nn.Module):
             {str(p): nn.Parameter(torch.zeros(d_model)) for p in self.offsets}
         )
 
+        if synapse_mode == "factorized":
+            self.v_proj = nn.ModuleDict(
+                {
+                    str(p): nn.Linear(d_model, synapse_rank, bias=False)
+                    for p in self.offsets
+                }
+            )
+            self.u_proj = nn.ModuleDict(
+                {
+                    str(p): nn.Linear(synapse_rank, d_model, bias=False)
+                    for p in self.offsets
+                }
+            )
+            self.s_scale = nn.ParameterDict(
+                {
+                    str(p): nn.Parameter(torch.randn(synapse_rank) * 0.01)
+                    for p in self.offsets
+                }
+            )
+            if identity_transport:
+                self.beta_id = nn.ParameterDict(
+                    {str(p): nn.Parameter(torch.ones(1)) for p in self.offsets}
+                )
+        else:
+            self.w_offsets = nn.ModuleDict(
+                {str(p): nn.Linear(d_model, d_model, bias=False) for p in self.offsets}
+            )
+
+        if hierarchical_gate:
+            self.rho = nn.ParameterDict(
+                {str(p): nn.Parameter(torch.zeros(1)) for p in self.offsets}
+            )
+
+    def _transform(self, x: torch.Tensor, str_p: str) -> torch.Tensor:
+        if self.synapse_mode == "factorized":
+            v = self.v_proj[str_p](x)
+            v_scaled = v * self.s_scale[str_p]
+            low_rank = self.u_proj[str_p](v_scaled)
+            if self.identity_transport and self.beta_id is not None:
+                return self.beta_id[str_p] * x + low_rank
+            return low_rank
+        return self.w_offsets[str_p](x)
+
+    def _scale_gate(self, str_p: str) -> float:
+        if self.rho and str_p in self.rho:
+            return torch.sigmoid(self.rho[str_p])
+        return 1.0
+
     def forward_train(self, T_prev: torch.Tensor) -> torch.Tensor:
-        """Parallel sequence forward pass for training."""
         b, n, d = T_prev.shape
         t_pos = torch.zeros_like(T_prev)
         for p in self.offsets:
@@ -65,8 +104,8 @@ class PositionalDilatedMix(nn.Module):
             h_g = self.p_g(t_shifted)
             gate_logits = torch.matmul(h_g, self.gate_w[str_p]) + self.gate_b[str_p]
             g = torch.sigmoid(gate_logits)
-            transformed = self.w_offsets[str_p](t_shifted)
-            t_pos = t_pos + g * transformed
+            transformed = self._transform(t_shifted, str_p)
+            t_pos = t_pos + self._scale_gate(str_p) * g * transformed
         return t_pos
 
     def forward_step(
@@ -74,7 +113,6 @@ class PositionalDilatedMix(nn.Module):
         T_prev_history: Union[torch.Tensor, List[torch.Tensor]],
         current_pos: int,
     ) -> torch.Tensor:
-        """Single-step incremental lookup pass for cached inference."""
         if isinstance(T_prev_history, torch.Tensor):
             b, n_hist, d = T_prev_history.shape
             device = T_prev_history.device
@@ -107,14 +145,12 @@ class PositionalDilatedMix(nn.Module):
             h_g = self.p_g(t_p)
             gate_logits = torch.matmul(h_g, self.gate_w[str_p]) + self.gate_b[str_p]
             g = torch.sigmoid(gate_logits)
-            transformed = self.w_offsets[str_p](t_p)
-            t_pos = t_pos + g * transformed
+            transformed = self._transform(t_p, str_p)
+            t_pos = t_pos + self._scale_gate(str_p) * g * transformed
         return t_pos
 
 
 class ConsolidationLayer(nn.Module):
-    """Single Consolidation Stack Layer: PositionalDilatedMix followed by Cell processing."""
-
     def __init__(
         self,
         d_model: int,
@@ -123,10 +159,17 @@ class ConsolidationLayer(nn.Module):
         d_ff: int,
         dropout: float = 0.0,
         activation: str = "gelu",
+        synapse_mode: str = "factorized",
+        synapse_rank: int = 32,
+        identity_transport: bool = True,
+        hierarchical_gate: bool = True,
     ):
         super().__init__()
-        self.mix = PositionalDilatedMix(d_model, d_gate, offsets)
+        self.mix = PositionalDilatedMix(
+            d_model, d_gate, offsets, synapse_mode, synapse_rank, identity_transport, hierarchical_gate
+        )
         self.cell = Cell(d_model, d_ff, dropout, activation)
+        self.max_offset = max(offsets) if offsets else 0
 
     def forward_train(self, T_prev: torch.Tensor) -> torch.Tensor:
         t_pos = self.mix.forward_train(T_prev)
@@ -151,30 +194,27 @@ class ConsolidationLayer(nn.Module):
 
 
 class ConsolidationStack(nn.Module):
-    """Deep Consolidation Stack consisting of multiple stacked ConsolidationLayers."""
-
     def __init__(
         self,
-        d_model: int,
-        d_gate: int,
-        offsets: List[int],
-        num_consolidation_layers: int,
-        d_ff: int,
-        dropout: float = 0.0,
-        activation: str = "gelu",
+        config: EngramaConfig,
     ):
         super().__init__()
+        self.config = config
         self.layers = nn.ModuleList(
             [
                 ConsolidationLayer(
-                    d_model=d_model,
-                    d_gate=d_gate,
-                    offsets=offsets,
-                    d_ff=d_ff,
-                    dropout=dropout,
-                    activation=activation,
+                    d_model=config.d_model,
+                    d_gate=config.d_gate,
+                    offsets=config.get_layer_offsets(i, config.num_consolidation_layers),
+                    d_ff=config.d_ff,
+                    dropout=config.dropout,
+                    activation=config.activation,
+                    synapse_mode=config.synapse_mode,
+                    synapse_rank=config.synapse_rank,
+                    identity_transport=config.identity_transport,
+                    hierarchical_gate=config.hierarchical_gate,
                 )
-                for _ in range(num_consolidation_layers)
+                for i in range(config.num_consolidation_layers)
             ]
         )
 
@@ -193,13 +233,12 @@ class ConsolidationStack(nn.Module):
         T0_current: Optional[torch.Tensor] = None,
         return_all_layers: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
-        """Incremental cached step pass through the entire consolidation stack."""
         if T0_current is not None:
             history_t0 = cache.T0 + [T0_current]
-            current_pos = len(cache.T0)
+            current_pos = cache.absolute_index()
         else:
             history_t0 = cache.T0
-            current_pos = len(cache.T0) - 1
+            current_pos = cache.absolute_index() - 1
 
         layer_outputs: List[torch.Tensor] = []
         for l, layer in enumerate(self.layers):

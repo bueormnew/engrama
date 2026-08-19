@@ -1,69 +1,38 @@
-"""
-ENGRAMA Isolated Encoder Module (Phase 1)
-Author: BUEORM
-License: AGPL-3.0
-"""
-
-import torch
 from torch import nn
+import torch
 
-from engrama.primitives import SynapseLayer
-
+from engrama.primitives import SynapseLayer, SharedCoreCellGroup, FactorizedSynapse
+from engrama.config import EngramaConfig
 
 class IsolatedEncoder(nn.Module):
-    """Isolated Encoder (Phase 1): Processes input tokens without temporal context leakage.
-
-    Each token position t in x is encoded independently into an initial state T_0[t] using
-    isolated Synapse layers.
-
-    Args:
-        d_model (int): Hidden dimension size.
-        d_gate (int): Gate projection size.
-        num_cells (int): Number of cellular channels.
-        num_encoder_layers (int): Number of Synapse layers in the encoder.
-        d_ff (int): Feedforward expansion dimension.
-        dropout (float): Dropout rate.
-        activation (str): Activation function name.
-    """
-
     def __init__(
         self,
-        d_model: int,
-        d_gate: int,
-        num_cells: int,
-        num_encoder_layers: int,
-        d_ff: int,
-        dropout: float = 0.0,
-        activation: str = "gelu",
+        config: EngramaConfig,
     ):
         super().__init__()
-        self.d_model = d_model
-        self.num_cells = num_cells
-        self.init_proj = nn.Linear(d_model, num_cells * d_model)
+        self.d_model = config.d_model
+        self.num_cells = config.num_cells
+        self.init_proj = nn.Linear(config.d_model, config.num_cells * config.d_model)
         self.layers = nn.ModuleList(
             [
                 SynapseLayer(
-                    d_model=d_model,
-                    d_gate=d_gate,
-                    num_cells=num_cells,
-                    d_ff=d_ff,
-                    dropout=dropout,
-                    activation=activation,
+                    d_model=config.d_model,
+                    d_gate=config.d_gate,
+                    num_cells=config.num_cells,
+                    d_ff=config.d_ff,
+                    dropout=config.dropout,
+                    activation=config.activation,
+                    synapse_mode=config.synapse_mode,
+                    synapse_rank=config.synapse_rank,
+                    identity_transport=config.identity_transport,
+                    cell_mode=config.cell_mode,
                 )
-                for _ in range(num_encoder_layers)
+                for _ in range(config.num_encoder_layers)
             ]
         )
-        self.w_pool = nn.Linear(num_cells * d_model, d_model)
+        self.w_pool = nn.Linear(config.num_cells * config.d_model, config.d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass for token-isolated encoding.
-
-        Args:
-            x (Tensor): Input embeddings of shape (B, N, D) or (B, D).
-
-        Returns:
-            Tensor: Isolated representations T_0 of shape (B, N, D) or (B, D).
-        """
         is_2d = x.dim() == 2
         if is_2d:
             x = x.unsqueeze(1)
