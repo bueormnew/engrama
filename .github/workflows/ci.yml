@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CPU-only PyTorch
+        # Keeps the CI artifact small and avoids CUDA drivers on runners.
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package (editable)
+        run: pip install -e .
+
+      - name: Run test suite (unittest)
+        run: python -m unittest discover -s tests -q
+
+      - name: Smoke test — package imports & CLI
+        run: |
+          python -c "import engrama; print('engrama', engrama.__version__, '| author:', engrama.__author__)"
+          engrama info
+          engrama sizes
+
+  package:
+    name: Packaging sanity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: pip install build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Verify wheel metadata
+        run: python -c "import zipfile,glob; w=glob.glob('dist/*.whl')[0]; print(w); print(zipfile.ZipFile(w).read(w.split('/')[-1].replace('.whl','.dist-info/METADATA')).decode()[:400])"
