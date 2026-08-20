@@ -165,7 +165,24 @@ def main() -> None:
     ap.add_argument("--out", type=str,
                     default=os.path.join(os.path.dirname(__file__),
                                          "KV_RETRIEVAL_REPORT.md"))
+    ap.add_argument(
+        "--force", action="store_true",
+        help="Overwrite the target report file if it already exists "
+             "(by default an existing file is never overwritten; a run "
+             "suffixed report is written instead)",
+    )
     args = ap.parse_args()
+
+    # Never clobber an existing report silently: the versioned
+    # KV_RETRIEVAL_REPORT.md holds the canonical published numbers.
+    out_path = args.out
+    if os.path.exists(out_path) and not args.force:
+        base, ext = os.path.splitext(out_path)
+        out_path = f"{base}_{args.steps}steps_seed{args.seed}{ext}"
+        print(
+            f"[benchmark] {args.out} already exists; writing run-specific "
+            f"report to {out_path} (pass --force to overwrite)"
+        )
     device = "cuda" if torch.cuda.is_available() else "cpu"
     chance = 1.0 / (VAL_HI - VAL_LO + 1)
 
@@ -237,10 +254,10 @@ def main() -> None:
         "",
     ]
 
-    with open(args.out, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print("\n".join(lines))
-    print(f"\n[benchmark] report written to {args.out}")
+    print(f"\n[benchmark] report written to {out_path}")
 
 
 if __name__ == "__main__":

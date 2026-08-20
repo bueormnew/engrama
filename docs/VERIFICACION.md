@@ -29,7 +29,7 @@ CPU, torch 2.13, float32 salvo indicación.
   transporte identidad, con ancla global, init inestable, agregaciones
   `mean`/`max`, `M=1`, presets `v1`/`v2`, sinapsis densas, offsets densos
   con células independientes, embeddings no atados, activaciones `relu`/`silu`.
-- Cada combinación se verifica bajo **ambigüedad de cachés** (`full` y
+- Cada combinación se verifica bajo **ambos modos de caché** (`full` y
   `hierarchical`): `forward(seq)` vs `step_forward` token a token.
 - **Resultado medido: error máximo 5.96e-07** (float32). Umbral del test: 1e-4.
 - Régimen de desborde FIFO (`test_overflow_equivalence`): igualdad exacta
@@ -44,7 +44,7 @@ CPU, torch 2.13, float32 salvo indicación.
 
 Con $N_{max} = 256$ y $L = 8$ (preset `small`/`base`):
 
-- Capacidades por capa: `[3, 5, 9, 17, 33, 65, 129, 1]` (total 235 estados).
+- Capacidades por capa: `[3, 5, 9, 17, 33, 65, 129, 1]` (total 262 estados).
 - Caché completo V2: 256 × 8 = 2048 estados.
 - **Reducción de estado: 7.82×** (`test_state_reduction`).
 

@@ -21,7 +21,7 @@ Implements the explicit separation of V3 spec section 22:
 - :class:`EngramaCache` -- public facade combining both, with the legacy
   read-only views (``T0``, ``Tl``, ``timestamps``) kept for inspection.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

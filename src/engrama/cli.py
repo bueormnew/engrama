@@ -3,7 +3,7 @@
 Quick commands (safe defaults -- train uses the ``small`` preset so it runs
 on modest machines) and full expert control via flags.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -150,6 +150,7 @@ def main() -> None:
                 temperature=args.temperature,
                 top_k=args.top_k,
                 top_p=args.top_p,
+                use_cache=not args.no_cache,
             ):
                 print(char_token, end="", flush=True)
             print()
@@ -221,7 +222,7 @@ def main() -> None:
     elif args.command == "info":
         print("=" * 64)
         print("ENGRAMA Neural Architecture & Library")
-        print("Author: BUEORM")
+        print("Author: Gerson Fabian Buenahora Ormaza (BUEORM)")
         print("License: AGPL-3.0 (GNU Affero General Public License v3.0)")
         print(f"Version: {__version__} (V3 architecture)")
         print("-" * 64)

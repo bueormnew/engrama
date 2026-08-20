@@ -13,7 +13,7 @@ The parallel ``forward`` (training) and the incremental ``step_forward``
 (inference) are exactly equivalent by causal invariance (V3 spec section
 23), regardless of cache mode (V3 spec section 24).
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -30,6 +30,21 @@ from engrama.consolidation import ConsolidationStack
 from engrama.encoder import IsolatedEncoder
 from engrama.evoker import MultiCandidateEvoker
 from engrama.trace import EngramaCache
+
+# Default BOS token id used when ``generate``/``generate_stream`` receive an
+# empty prompt. Matches ``EngramaTokenizer.SPECIAL_TOKENS["<bos>"]`` (id 2).
+DEFAULT_BOS_TOKEN_ID = 2
+
+
+def _validate_prompt_ids(prompt_ids: List[int], vocab_size: int) -> None:
+    """Raise ``ValueError`` on empty, negative or out-of-range prompt ids."""
+    for t in prompt_ids:
+        if t < 0 or t >= vocab_size:
+            raise ValueError(
+                f"prompt_ids contains token id {t} outside [0, {vocab_size}) "
+                f"(vocab_size={vocab_size}); re-encode the prompt with the "
+                f"matching tokenizer"
+            )
 
 
 class EngramaModel(nn.Module):
@@ -183,9 +198,27 @@ class EngramaModel(nn.Module):
         use_cache: bool = True,
         eos_token_id: Optional[int] = None,
     ) -> List[int]:
-        """Autoregressively generate tokens from prompt ids."""
+        """Autoregressively generate tokens from prompt ids.
+
+        Args:
+            prompt_ids: Prompt token ids (empty list starts from the default
+                BOS token, ``DEFAULT_BOS_TOKEN_ID``).
+            max_new_tokens: Number of tokens to generate.
+            temperature: Sampling temperature (``<= 0`` => greedy argmax).
+            top_k: Keep only the top-k most likely tokens (``None`` disables).
+            top_p: Nucleus sampling threshold (``None`` disables).
+            repetition_penalty: Penalty > 1.0 discourages repeated tokens.
+            use_cache: Incremental generation with the trace cache (default).
+                When ``False``, re-runs the parallel forward over the sliding
+                window of the last ``context_length`` tokens.
+            eos_token_id: Stop generation after emitting this token id.
+
+        Returns:
+            Prompt ids followed by the generated ids.
+        """
         if not prompt_ids:
-            prompt_ids = [2]
+            prompt_ids = [DEFAULT_BOS_TOKEN_ID]
+        _validate_prompt_ids(prompt_ids, self.config.vocab_size)
         generated = list(prompt_ids)
         device = next(self.parameters()).device
         was_training = self.training
@@ -247,41 +280,80 @@ class EngramaModel(nn.Module):
         top_p: Optional[float] = None,
         repetition_penalty: float = 1.0,
         eos_token_id: Optional[int] = None,
+        use_cache: bool = True,
     ) -> Generator[int, None, None]:
-        """Stream generated token ids one by one using the trace cache."""
+        """Stream generated token ids one by one.
+
+        Args:
+            prompt_ids: Prompt token ids (empty list starts from the default
+                BOS token, ``DEFAULT_BOS_TOKEN_ID``).
+            max_new_tokens: Number of tokens to generate.
+            temperature: Sampling temperature (``<= 0`` => greedy argmax).
+            top_k: Keep only the top-k most likely tokens (``None`` disables).
+            top_p: Nucleus sampling threshold (``None`` disables).
+            repetition_penalty: Penalty > 1.0 discourages repeated tokens.
+            eos_token_id: Stop generation after emitting this token id.
+            use_cache: Incremental generation with the trace cache (default).
+                When ``False``, re-runs the parallel forward over the sliding
+                window of the last ``context_length`` tokens.
+
+        Yields:
+            One generated token id at a time (prompt excluded).
+        """
         if not prompt_ids:
-            prompt_ids = [2]
+            prompt_ids = [DEFAULT_BOS_TOKEN_ID]
+        _validate_prompt_ids(prompt_ids, self.config.vocab_size)
         generated = list(prompt_ids)
         device = next(self.parameters()).device
         was_training = self.training
         self.eval()
 
         try:
-            cache = self.get_cache()
-            logits_t: Optional[torch.Tensor] = None
             with torch.no_grad():
-                for t, tok in enumerate(prompt_ids):
-                    token_tensor = torch.tensor([[tok]], dtype=torch.long, device=device)
-                    logits_t, _ = self.step_forward(token_tensor, cache, timestamp=t)
-
-                for i in range(max_new_tokens):
-                    if logits_t is None:
-                        break
-                    next_token = self._sample_next_token(
-                        logits_t, temperature, top_k, top_p,
-                        repetition_penalty, generated,
-                    )
-                    generated.append(next_token)
-                    yield next_token
-                    if eos_token_id is not None and next_token == eos_token_id:
-                        return
-                    if i < max_new_tokens - 1:
+                if use_cache:
+                    cache = self.get_cache()
+                    logits_t: Optional[torch.Tensor] = None
+                    for t, tok in enumerate(prompt_ids):
                         token_tensor = torch.tensor(
-                            [[next_token]], dtype=torch.long, device=device
+                            [[tok]], dtype=torch.long, device=device
                         )
                         logits_t, _ = self.step_forward(
-                            token_tensor, cache, timestamp=len(prompt_ids) + i
+                            token_tensor, cache, timestamp=t
                         )
+
+                    for i in range(max_new_tokens):
+                        if logits_t is None:
+                            break
+                        next_token = self._sample_next_token(
+                            logits_t, temperature, top_k, top_p,
+                            repetition_penalty, generated,
+                        )
+                        generated.append(next_token)
+                        yield next_token
+                        if eos_token_id is not None and next_token == eos_token_id:
+                            return
+                        if i < max_new_tokens - 1:
+                            token_tensor = torch.tensor(
+                                [[next_token]], dtype=torch.long, device=device
+                            )
+                            logits_t, _ = self.step_forward(
+                                token_tensor, cache, timestamp=len(prompt_ids) + i
+                            )
+                else:
+                    for _ in range(max_new_tokens):
+                        window = generated[-self.config.context_length:]
+                        input_tensor = torch.tensor(
+                            [window], dtype=torch.long, device=device
+                        )
+                        logits = self.forward(input_tensor)
+                        next_token = self._sample_next_token(
+                            logits[:, -1, :], temperature, top_k, top_p,
+                            repetition_penalty, generated,
+                        )
+                        generated.append(next_token)
+                        yield next_token
+                        if eos_token_id is not None and next_token == eos_token_id:
+                            return
         finally:
             if was_training:
                 self.train()

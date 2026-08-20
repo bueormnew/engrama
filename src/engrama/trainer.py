@@ -4,7 +4,7 @@ High-level training engine with AdamW, gradient clipping and an optional
 learning-rate schedule (constant, linear-warmup, or warmup + cosine decay,
 as recommended for V3 -- see paper section 8 and V3 spec section 32).
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -143,20 +143,31 @@ class Trainer:
         return loss_history
 
     def evaluate(self, dataset: Dataset, batch_size: int = 16) -> float:
-        """Evaluate mean cross-entropy loss on a dataset."""
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        """Evaluate mean cross-entropy loss on a dataset.
+
+        Targets equal to ``TextDataset.IGNORE_INDEX`` (``-100``) are excluded
+        from the loss (padding positions). The model is switched to eval mode
+        for the duration of the call and restored to its previous mode
+        afterwards.
+        """
+        was_training = self.model.training
         self.model.eval()
         total_loss = 0.0
         num_batches = 0
 
-        with torch.no_grad():
-            for batch in dataloader:
-                input_ids, target_ids = self._unpack_batch(batch)
-                logits = self.model(input_ids)
-                loss = F.cross_entropy(
-                    logits.view(-1, logits.size(-1)), target_ids.view(-1)
-                )
-                total_loss += loss.item()
-                num_batches += 1
+        try:
+            dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+            with torch.no_grad():
+                for batch in dataloader:
+                    input_ids, target_ids = self._unpack_batch(batch)
+                    logits = self.model(input_ids)
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)), target_ids.view(-1)
+                    )
+                    total_loss += loss.item()
+                    num_batches += 1
+        finally:
+            if was_training:
+                self.model.train()
 
         return total_loss / max(1, num_batches)

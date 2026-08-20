@@ -4,7 +4,7 @@ V3 interpretability (spec section 50): every route keeps inspectable,
 position-stable state, and the factorized synapses expose their alpha
 gates, identity betas and low-rank scales.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

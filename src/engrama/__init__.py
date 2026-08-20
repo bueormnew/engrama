@@ -23,7 +23,7 @@ Expert mode (full control)::
     )
     model = EngramaModel(config)
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -60,7 +60,7 @@ from engrama.trace import CircularTrace, EngramaCache, HierarchicalStateCache
 from engrama.trainer import Trainer
 
 __version__ = "0.3.0"
-__author__ = "BUEORM"
+__author__ = "Gerson Fabian Buenahora Ormaza (BUEORM)"
 __license__ = "AGPL-3.0"
 
 __all__ = [
