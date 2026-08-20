@@ -254,10 +254,10 @@ class SynapseLayer(nn.Module):
             alpha_beta = alpha
         u_id = torch.matmul(alpha_beta.transpose(-1, -2), H)  # (B, N, Cb, d)
 
-        # Fully vectorized tensor contraction over source cells (zero Python loops)
-        spread = z.unsqueeze(3) * self.s_scale.unsqueeze(0).unsqueeze(0)  # (B, N, Ca, Cb, r)
-        gated = alpha.unsqueeze(-1) * spread  # (B, N, Ca, Cb, r)
-        gated_sum = gated.sum(dim=2)  # (B, N, Cb, r)
+        # Contract directly instead of materialising both ``spread`` and
+        # ``gated`` 5-D tensors (two ~64 MiB temporaries at the TinyStories
+        # training shape).  The equation and gradients are identical.
+        gated_sum = torch.einsum("ijac,ijar,acr->ijcr", alpha, z, self.s_scale)
         u_lr = gated_sum @ self.U.T  # (B, N, Cb, d)
         return u_id + u_lr
 

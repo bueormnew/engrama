@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from engrama.losses import chunked_cross_entropy
 from engrama.model import EngramaModel
+from engrama.optimization import adamw
 
 # Above this vocabulary size the Trainer switches to chunked cross-entropy
 _LARGE_VOCAB_THRESHOLD = 16384
@@ -64,6 +65,11 @@ class Trainer:
         scheduler: str = "none",
         warmup_steps: int = 0,
         use_amp: bool = False,
+        fused_optimizer: Optional[bool] = None,
+        fused_linear_loss: bool = True,
+        linear_chunk_size: int = 2048,
+        checkpoint_loss_chunks: bool = False,
+        non_blocking: bool = True,
     ):
         if scheduler not in ("none", "warmup", "cosine"):
             raise ValueError("scheduler must be 'none', 'warmup' or 'cosine'")
@@ -72,11 +78,19 @@ class Trainer:
         self.scheduler_name = scheduler
         self.warmup_steps = max(0, warmup_steps)
         self.use_amp = bool(use_amp and self.device.type == "cuda")
+        self.non_blocking = bool(non_blocking and self.device.type == "cuda")
+        self.fused_linear_loss = fused_linear_loss
+        self.linear_chunk_size = linear_chunk_size
+        self.checkpoint_loss_chunks = checkpoint_loss_chunks
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp) if self.use_amp else None
         self.model = model.to(self.device)
         if optimizer is None:
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(), lr=lr, weight_decay=weight_decay
+            self.optimizer = adamw(
+                self.model.parameters(),
+                lr=lr,
+                weight_decay=weight_decay,
+                betas=(0.9, 0.95),
+                fused=(self.device.type == "cuda") if fused_optimizer is None else fused_optimizer,
             )
         else:
             self.optimizer = optimizer
@@ -111,8 +125,28 @@ class Trainer:
         self, batch: Any
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if isinstance(batch, dict):
-            return batch["input_ids"].to(self.device), batch["target_ids"].to(self.device)
-        return batch[0].to(self.device), batch[1].to(self.device)
+            return (
+                batch["input_ids"].to(self.device, non_blocking=self.non_blocking),
+                batch["target_ids"].to(self.device, non_blocking=self.non_blocking),
+            )
+        return (
+            batch[0].to(self.device, non_blocking=self.non_blocking),
+            batch[1].to(self.device, non_blocking=self.non_blocking),
+        )
+
+    def _forward_loss(self, input_ids: torch.Tensor, target_ids: torch.Tensor) -> torch.Tensor:
+        if (
+            self.fused_linear_loss
+            and self.model.config.vocab_size > _LARGE_VOCAB_THRESHOLD
+            and self.model.evoker.aggregation in ("latent_fusion", "mean")
+        ):
+            return self.model.forward_loss(
+                input_ids,
+                target_ids,
+                linear_chunk_size=self.linear_chunk_size,
+                checkpoint_chunks=self.checkpoint_loss_chunks,
+            )
+        return _cross_entropy(self.model(input_ids), target_ids)
 
     def train_epoch(
         self, dataloader: DataLoader, total_steps: Optional[int] = None
@@ -128,8 +162,7 @@ class Trainer:
 
             if self.use_amp:
                 with torch.cuda.amp.autocast(dtype=torch.float16):
-                    logits = self.model(input_ids)
-                loss = _cross_entropy(logits, target_ids)
+                    loss = self._forward_loss(input_ids, target_ids)
                 self.scaler.scale(loss).backward()
                 if self.gradient_clip and self.gradient_clip > 0:
                     self.scaler.unscale_(self.optimizer)
@@ -139,8 +172,7 @@ class Trainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
-                logits = self.model(input_ids)
-                loss = _cross_entropy(logits, target_ids)
+                loss = self._forward_loss(input_ids, target_ids)
                 loss.backward()
                 if self.gradient_clip and self.gradient_clip > 0:
                     torch.nn.utils.clip_grad_norm_(

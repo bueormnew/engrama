@@ -14,7 +14,7 @@ Esta versión introduce **ENGRAMA V4**, diseñada para resolver de forma simult�
 - **Autor**: Gerson Fabian Buenahora Ormaza (BUEORM)
 - **Año**: 2026
 - **Licencia**: GNU Affero General Public License v3.0 (AGPL-3.0)
-- **Versión**: 0.4.0 (Arquitectura V4)
+- **Versión**: 0.5.0 (Arquitectura V4 + runtime de entrenamiento optimizado)
 
 ---
 
@@ -313,12 +313,42 @@ En lugar de almacenar $L \times N_{max}$ estados (como en Transformers con KV-ca
 
 ## 📊 Benchmarks y Reportes
 
-### 1. Benchmark de Velocidad de Entrenamiento (TinyStories 20M, GPT-2 Vocab 50k, Seq 512)
-| Configuración | GPU | Precisión | Tiempo por paso | Tiempo 500M tokens |
-|---|---|---|---|---|
-| ENGRAMA V3 (`logsumexp` checkpointed) | 1× T4 (16GB) | FP32 | ~3.40 s/paso | >30.8 horas |
-| **ENGRAMA V4 (`latent_fusion` + AMP)** | **1× T4 (16GB)** | **FP16** | **~0.20 s/paso** | **~1.8 horas** ($17\times$ más rápido) |
-| **ENGRAMA V4 (`latent_fusion` + AMP)** | **2× T4 (DataParallel)** | **FP16** | **~0.11 s/paso** | **~1.0 hora** ($31\times$ más rápido) |
+### 1. Rendimiento de entrenamiento (TinyStories 20M, GPT-2 Vocab 50k, Seq 512)
+
+Los números publicados anteriormente para `nn.DataParallel` eran estimaciones
+y no una medición reproducible; no deben usarse como benchmark. Esta versión
+incluye `benchmarks/training_throughput.py` para medir baseline/optimizado con
+warm-up, sincronización CUDA, tokens/s y pico real de VRAM:
+
+```bash
+python benchmarks/training_throughput.py --profile baseline --steps 100
+python benchmarks/training_throughput.py --profile optimized --steps 100
+python benchmarks/training_throughput.py --profile checkpoint --steps 100
+```
+
+En 2 GPUs debe medirse el trainer DDP descrito abajo. No se promete una cifra
+fija: Kaggle, la versión de PyTorch/CUDA, el autotuning y el tamaño de chunk
+cambian sustancialmente el resultado.
+
+### Entrenamiento optimizado en 2× GPU (DDP, sin cambiar la arquitectura)
+
+Para vocabulario GPT-2 y contexto 512 se recomienda reemplazar
+`nn.DataParallel` por el trainer DDP incluido. Mantiene una réplica persistente
+por GPU, distribuye los datos sin duplicarlos, fusiona la proyección lineal con
+CE por posiciones y habilita `torch.compile` + AdamW fusionado:
+
+```bash
+torchrun --standalone --nproc_per_node=2 \
+  examples/train_tinystories_ddp.py \
+  --train tinystories_train.ids \
+  --valid tinystories_valid.ids \
+  --output /kaggle/working/engrama_v4_20m_gpt2 \
+  --batch-size 16 --resume
+```
+
+El batch indicado es por GPU (batch global 32). La arquitectura y los
+checkpoints no cambian. Diagnóstico, perfiles velocidad/VRAM y metodología de
+medición: **[docs/OPTIMIZACION_ENTRENAMIENTO.md](docs/OPTIMIZACION_ENTRENAMIENTO.md)**.
 
 ### 2. Benchmark de Recuperación Clave-Valor de Largo Alcance (`benchmarks/kv_retrieval.py`)
 Secuencias de 192 tokens con pares clave-valor aleatorios y consultas tardías a distancias de 24 a 176 tokens:
@@ -343,7 +373,8 @@ engrama/
 │   ├── trainer.py            # Trainer de alto nivel con soporte AMP
 │   ├── inference.py          # Generador autoregresivo con muestreo
 │   ├── tokenizer.py          # Tokenizador de caracteres y adaptador BPE
-│   ├── losses.py             # chunked_cross_entropy para bajo consumo de VRAM
+│   ├── losses.py             # CE streaming y linear+CE sin logits globales
+│   ├── optimization.py       # DDP, compile y AdamW fusionado
 │   └── quick.py              # Quickstart API en 3 líneas
 ├── kaggle/
 │   ├── engrama_v4_20m_tinystories_gpt2.ipynb  # Notebook oficial de entrenamiento V4

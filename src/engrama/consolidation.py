@@ -171,90 +171,74 @@ class PositionalDilatedMix(nn.Module):
     # ------------------------------------------------------------------
     # Parallel training path: T_prev (B, N, d), T_0 (B, N, d) -> T_pos (B, N, d)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _causal_views(x: torch.Tensor, offsets: List[int]) -> torch.Tensor:
+        """Stack causal shifts with one padding allocation instead of P pads."""
+        n, max_offset = x.size(1), max(offsets)
+        padded = F.pad(x, (0, 0, max_offset, 0))
+        return torch.stack(
+            [padded[:, max_offset - p : max_offset - p + n] for p in offsets],
+            dim=2,
+        )
+
     def forward_train(
         self, T_prev: torch.Tensor, T_0: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        b, n, d = T_prev.shape
-        t_pos = torch.zeros_like(T_prev)
+        """Vectorized parallel path over every offset in the layer.
+
+        The previous implementation launched the full gate/transport pipeline
+        separately for each offset.  Stacking the (at most four) resonant views
+        turns those dozens of small kernels into batched contractions that
+        ``torch.compile`` can fuse, without changing the equations.
+        """
+        # Offsets beyond this concrete sequence have no causally available
+        # source (the eager reference path skipped them as well).
+        offsets = [p for p in self.offsets if p < T_prev.size(1)]
+        keys = [str(p) for p in offsets]
         scale_dg = 1.0 / math.sqrt(self.d_gate)
+        sources = self._causal_views(T_prev, offsets)  # (B,N,P,d)
 
-        # Pre-project linearly once per layer (saves redundant matmuls)
-        if self.synapse_mode == "factorized":
-            Z_prev = T_prev @ self.V
-        else:
-            Z_prev = None
+        k_all = self.p_g_src(T_prev)
+        k_src = self._causal_views(k_all, offsets)  # (B,N,P,dg)
+        gate_w_src = torch.stack([self.gate_w_src[k] for k in keys])
+        gate_b = torch.stack([self.gate_b[k] for k in keys])
+        g_src = torch.einsum("bnpq,pqd->bnpd", k_src, gate_w_src)
 
-        K_src = self.p_g_src(T_prev)
         if self.gating_mode == "dual" and self.p_g_tgt is not None:
-            Q_tgt = self.p_g_tgt(T_prev)
+            q_tgt = self.p_g_tgt(T_prev)
+            gate_w_tgt = torch.stack([self.gate_w_tgt[k] for k in keys])
+            g_tgt = torch.einsum("bnq,pqd->bnpd", q_tgt, gate_w_tgt)
+            bilinear = (q_tgt.unsqueeze(2) * k_src).sum(dim=-1, keepdim=True)
+            gates = _sigmoid(g_src + g_tgt + bilinear * scale_dg + gate_b)
         else:
-            Q_tgt = None
+            gates = _sigmoid(g_src + gate_b)
 
+        if self.synapse_mode == "factorized":
+            z_prev = T_prev @ self.V
+            z_src = self._causal_views(z_prev, offsets)
+            scales = torch.stack([self.s_scale[k] for k in keys])
+            y_ctx = (z_src * scales.view(1, 1, len(offsets), -1)) @ self.U.T
+            if self.identity_transport and self.beta is not None:
+                beta = torch.stack([self.beta[k] for k in keys]).view(1, 1, -1, 1)
+                y_ctx = y_ctx + beta * sources
+        else:
+            dense = torch.stack([self.w_dense[k] for k in keys])
+            y_ctx = torch.einsum("bnpd,pde->bnpe", sources, dense)
+
+        y_total = y_ctx
         if self.trace_tap and T_0 is not None and self.V_tr is not None:
-            Z_0 = T_0 @ self.V_tr
-        else:
-            Z_0 = None
+            trace_sources = self._causal_views(T_0, offsets)
+            z_trace = self._causal_views(T_0 @ self.V_tr, offsets)
+            trace_scales = torch.stack([self.s_scale_tr[k] for k in keys])
+            y_trace = (z_trace * trace_scales.view(1, 1, len(offsets), -1)) @ self.U_tr.T
+            beta_tr = torch.stack([self.beta_tr[k] for k in keys]).view(1, 1, -1, 1)
+            gamma_tr = torch.stack([self.gamma_tr[k] for k in keys]).view(1, 1, -1, 1)
+            y_total = y_total + gamma_tr * (y_trace + beta_tr * trace_sources)
 
-        for p in self.offsets:
-            str_p = str(p)
-            if p == 0:
-                t_s = T_prev
-                k_s = K_src
-                z_s = Z_prev
-            elif p < n:
-                t_s = F.pad(T_prev[:, :-p, :], (0, 0, p, 0))
-                k_s = F.pad(K_src[:, :-p, :], (0, 0, p, 0))
-                z_s = F.pad(Z_prev[:, :-p, :], (0, 0, p, 0)) if Z_prev is not None else None
-            else:
-                continue  # causal availability: p > i never contributes
-
-            # Gating calculation
-            if self.gating_mode == "dual" and Q_tgt is not None and self.gate_w_tgt is not None:
-                bilinear = (Q_tgt * k_s).sum(dim=-1, keepdim=True) * scale_dg
-                g_tgt = Q_tgt @ self.gate_w_tgt[str_p]
-                g_src = k_s @ self.gate_w_src[str_p]
-                g = _sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
-            else:
-                g = _sigmoid(k_s @ self.gate_w_src[str_p] + self.gate_b[str_p])
-
-            # Context transformation
-            if self.synapse_mode == "factorized" and z_s is not None:
-                low_rank = (z_s * self.s_scale[str_p]) @ self.U.T
-                if self.identity_transport and self.beta is not None:
-                    y_ctx = self.beta[str_p] * t_s + low_rank
-                else:
-                    y_ctx = low_rank
-            else:
-                y_ctx = t_s @ self.w_dense[str_p]
-
-            # Direct Trace Tap contribution (V4)
-            if self.trace_tap and T_0 is not None and Z_0 is not None and self.U_tr is not None:
-                if p == 0:
-                    t0_s = T_0
-                    z0_s = Z_0
-                elif p < n:
-                    t0_s = F.pad(T_0[:, :-p, :], (0, 0, p, 0))
-                    z0_s = F.pad(Z_0[:, :-p, :], (0, 0, p, 0))
-                else:
-                    t0_s = z0_s = None
-
-                if t0_s is not None and z0_s is not None:
-                    low_rank_tr = (z0_s * self.s_scale_tr[str_p]) @ self.U_tr.T
-                    y_tr = self.beta_tr[str_p] * t0_s + low_rank_tr
-                    y_total = y_ctx + self.gamma_tr[str_p] * y_tr
-                else:
-                    y_total = y_ctx
-            else:
-                y_total = y_ctx
-
-            if self.hierarchical_gate and self.rho is not None:
-                rho_p = _sigmoid(self.rho[str_p])
-            else:
-                rho_p = 1.0
-
-            t_pos = t_pos + rho_p * (g * y_total)
-
-        return t_pos
+        if self.hierarchical_gate and self.rho is not None:
+            rho = _sigmoid(torch.stack([self.rho[k] for k in keys])).view(1, 1, -1, 1)
+            gates = gates * rho
+        return (gates * y_total).sum(dim=2)
 
     # ------------------------------------------------------------------
     # Incremental path: end-relative reads from retained windows.

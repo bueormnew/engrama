@@ -6,6 +6,29 @@ versionado semántico (semver).
 
 ## [No publicado] — 2026-08-20
 
+### Optimizado (flujo de entrenamiento, arquitectura intacta)
+
+- Nueva ruta multi-GPU DDP/NCCL con réplicas persistentes,
+  `DistributedSampler`, `static_graph` y gradient bucket views; reemplaza el
+  scatter/replicación/gather por paso de `nn.DataParallel`.
+- `EngramaModel.forward_loss()` y `linear_cross_entropy()` fusionan
+  lógicamente la proyección GPT-2 con CE por chunks de posiciones: no se
+  materializa ni retiene el tensor global `(B,N,V)`. Checkpointing opcional
+  permite seleccionar máximo rendimiento o mínima VRAM.
+- `chunked_cross_entropy` ahora es un único `autograd.Function`, con
+  log-sum-exp y backward softmax analítico en streaming; elimina el grafo de
+  cientos de micro-operaciones y las sincronizaciones `hit.any()` por chunk.
+- Consolidación vectorizada sobre offsets resonantes: una sola reserva de
+  padding y contracciones batched por capa. Sinapsis low-rank contraídas sin
+  materializar dos temporales 5-D.
+- Utilidades públicas para `torch.compile`, AdamW fusionado, configuración
+  CUDA y ciclo de vida distribuido en `engrama.optimization`.
+- Trainer oficial DDP en `examples/train_tinystories_ddp.py`, con transferencias
+  no bloqueantes, pinned memory, prefetch, workers persistentes, AMP y resume.
+- Guía técnica y metodología de profiling en
+  `docs/OPTIMIZACION_ENTRENAMIENTO.md`; pruebas de equivalencia de valores y
+  gradientes en `tests/test_optimized_training.py`.
+
 ### Corregido (NaN en TinyStories V4 + GPT-2 bajo AMP)
 
 - `kaggle/engrama_v4_20m_tinystories_gpt2.ipynb`: el loss se iba a `nan`
