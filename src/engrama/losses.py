@@ -61,17 +61,20 @@ def chunked_cross_entropy(
     flat = logits.reshape(-1, logits.size(-1))
     n, vocab = flat.shape
     flat_targets = targets.reshape(-1)
+    device = flat.device
 
-    m_run = flat.new_full((n,), -float("inf"))
-    s_run = flat.new_zeros((n,))
-    selected = flat.new_full((n,), -float("inf"))
-    valid = torch.ones(n, dtype=torch.bool, device=flat.device)
+    # Accumulators in fp32. Each vocabulary slice is upcast on its own so AMP
+    # never clones the full (N, V) logits (~1.6 GiB at 16x512x50257 fp32).
+    m_run = torch.full((n,), -float("inf"), dtype=torch.float32, device=device)
+    s_run = torch.zeros(n, dtype=torch.float32, device=device)
+    selected = torch.full((n,), -float("inf"), dtype=torch.float32, device=device)
+    valid = torch.ones(n, dtype=torch.bool, device=device)
     if ignore_index is not None:
         valid &= flat_targets != ignore_index
 
     for v0 in range(0, vocab, chunk_size):
         v1 = min(vocab, v0 + chunk_size)
-        l_chunk = flat[:, v0:v1]  # (N, c) view -- no copy
+        l_chunk = flat[:, v0:v1].float()  # (N, c) only -- not a (N, V) clone
         m_chunk = l_chunk.max(dim=-1).values  # (N,)
         m_new = torch.maximum(m_run, m_chunk)  # (N,)
         # Running log-sum-exp over chunks (numerically stable).
@@ -89,7 +92,7 @@ def chunked_cross_entropy(
     if reduction == "none":
         return loss
     if not valid.any():
-        return flat.new_zeros(())
+        return torch.zeros((), dtype=torch.float32, device=device)
     reduced = loss[valid].sum()
     if reduction == "sum":
         return reduced

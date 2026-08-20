@@ -6,6 +6,27 @@ versionado semántico (semver).
 
 ## [No publicado] — 2026-08-20
 
+### Corregido (NaN en TinyStories V4 + GPT-2 bajo AMP)
+
+- `kaggle/engrama_v4_20m_tinystories_gpt2.ipynb`: el loss se iba a `nan`
+  ~paso 350 (justo al terminar el warmup a `lr=6e-4`) y la muestra
+  degeneraba a `'Once upon a time!!!!…'` (token GPT-2 id 0 = `!`).
+  Causa del notebook, no de la arquitectura:
+  - `F.cross_entropy` **dentro** de `autocast(fp16)` sobre vocabulario
+    50,257: `log_softmax` fp16 desborda a Inf/NaN.
+  - `clip_grad_norm_` sobre grads Inf (`inf * 0 = nan`) envenenaba Adam
+    aunque GradScaler intentara saltar el paso.
+  - GEMM fp16 con reducción fp16 + warmup de 200 pasos + `beta2=0.999`.
+  Receta (arquitectura intacta): CE por trozos en fp32 (upcast **por
+  chunk de 2048, sin clonar** el `(B,N,V)` — pico extra ~64 MiB frente
+  a ~1.6 GiB de `logits.float()` o del `log_softmax` de `F.cross_entropy`),
+  pasos no-finitos se saltan, GEMM con acumulador fp32, AdamW
+  `betas=(0.9, 0.95)`, `lr=3e-4`, warmup 500, GradScaler `init_scale=2**12`.
+  El forward AMP fp16 no cambia: el paso sigue en ~0.4 s, la CE es <10 ms.
+- `losses.chunked_cross_entropy` y `Trainer`: mismos acumuladores fp32
+  por trozo (el overflow no puede colarse por el Trainer, y no se duplica
+  el vocabulario en VRAM).
+
 ### Corregido (memoria y notebooks Kaggle)
 
 - `evoker.py`: la agregación `logsumexp`/`max` con vocabularios grandes

@@ -75,6 +75,18 @@ class TestChunkedCrossEntropy(unittest.TestCase):
         got = chunked_cross_entropy(logits, targets, chunk_size=64)
         self.assertAlmostEqual(ref.item(), got.item(), places=5)
 
+    def test_fp16_logits_stay_finite_after_upcast(self):
+        """AMP fp16 CE over a GPT-2-sized vocab is the TinyStories NaN."""
+        torch.manual_seed(0)
+        n, vocab = 8, 50257
+        logits16 = (torch.randn(n, vocab) * 12).to(torch.float16)
+        targets = torch.randint(0, vocab, (n,))
+        # Naive fp16 log_softmax is allowed to overflow; the chunked path must not.
+        got = chunked_cross_entropy(logits16, targets, chunk_size=2048)
+        self.assertTrue(torch.isfinite(got), msg=f"chunked CE in fp16 produced {got}")
+        ref = F.cross_entropy(logits16.float(), targets)
+        self.assertAlmostEqual(ref.item(), got.item(), places=4)
+
 
 class TestEvokerChunkedPath(unittest.TestCase):
     """Force the chunked path on a small model and compare with the plain one."""
