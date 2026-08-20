@@ -1,13 +1,22 @@
-import torch
-from engrama.config import EngramaConfig
-from engrama.model import EngramaModel
+"""Ejemplo 01 — Crear un modelo ENGRAMA con el modo rápido.
 
-config = EngramaConfig(vocab_size=100, d_model=64, d_gate=16, num_cells=4, version="v2")
-model = EngramaModel(config)
-print("Model initialized:", model)
+Ejecuta:  python examples/01_create_model.py
+"""
+
+import torch
+
+import engrama
+
+# Presets de tamaño disponibles
+for size, info in engrama.list_sizes().items():
+    print(f"  {size:5s}: {info}")
+
+# Crear un modelo listo para entrenar con una sola línea
+model = engrama.create_model(size="tiny", vocab_size=100)
+print(f"\nModelo 'tiny': {model.num_parameters():,} parámetros")
 
 x = torch.randint(0, 100, (1, 10))
 logits = model(x)
-print("Logits shape:", logits.shape)
+print("Logits shape:", tuple(logits.shape))
 assert logits.shape == (1, 10, 100)
-print("Example 01 successful!")
+print("Ejemplo 01 OK")

@@ -1,14 +1,32 @@
-from torch import nn
-import torch
+"""ENGRAMA Isolated Encoder (Phase 1).
 
-from engrama.primitives import SynapseLayer, SharedCoreCellGroup, FactorizedSynapse
+Each token is encoded independently of its neighbors:
+
+    H_i^(0) = init_proj(e_i) reshaped to (C, d)
+    H^(k+1) = SynapseLayer(H^(k))        (C x C routing, token-wise)
+    T_0[i]  = w_pool(Flatten(H_i^(L_enc)))
+
+Because no operation mixes positions, ``T_0[i]`` depends exclusively on
+``x_i`` (isolated encoding theorem, V1/V2 paper section 5.1; untouched by
+V3) and the whole sequence encodes in parallel.
+
+Author: BUEORM
+License: AGPL-3.0
+"""
+
+from __future__ import annotations
+
+import torch
+from torch import nn
+
 from engrama.config import EngramaConfig
+from engrama.primitives import SynapseLayer
+
 
 class IsolatedEncoder(nn.Module):
-    def __init__(
-        self,
-        config: EngramaConfig,
-    ):
+    """Stack of C x C SynapseLayers applied independently to every token."""
+
+    def __init__(self, config: EngramaConfig):
         super().__init__()
         self.d_model = config.d_model
         self.num_cells = config.num_cells
@@ -26,6 +44,7 @@ class IsolatedEncoder(nn.Module):
                     synapse_rank=config.synapse_rank,
                     identity_transport=config.identity_transport,
                     cell_mode=config.cell_mode,
+                    stable_init=config.stable_init,
                 )
                 for _ in range(config.num_encoder_layers)
             ]
@@ -33,17 +52,17 @@ class IsolatedEncoder(nn.Module):
         self.w_pool = nn.Linear(config.num_cells * config.d_model, config.d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        is_2d = x.dim() == 2
-        if is_2d:
+        """Encode (B, N, d) embeddings to isolated footprints (B, N, d)."""
+        squeeze = x.dim() == 2
+        if squeeze:
             x = x.unsqueeze(1)
 
         b, n, _ = x.shape
         h = self.init_proj(x).view(b, n, self.num_cells, self.d_model)
         for layer in self.layers:
             h = layer(h)
-        h = h.view(b, n, self.num_cells * self.d_model)
-        out = self.w_pool(h)
+        out = self.w_pool(h.reshape(b, n, self.num_cells * self.d_model))
 
-        if is_2d:
+        if squeeze:
             out = out.squeeze(1)
         return out

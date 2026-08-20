@@ -1,10 +1,25 @@
-"""
-ENGRAMA Neural Model Core Integration Module
+"""ENGRAMA Neural Model Core Integration Module (V3).
+
+Integrates the four architecture phases:
+
+1. Isolated token encoding (:class:`~engrama.encoder.IsolatedEncoder`).
+2. Circular trace + hierarchical minimum-horizon cache
+   (:class:`~engrama.trace.EngramaCache`).
+3. Hierarchical dilated consolidation
+   (:class:`~engrama.consolidation.ConsolidationStack`).
+4. Multi-candidate recall (:class:`~engrama.evoker.MultiCandidateEvoker`).
+
+The parallel ``forward`` (training) and the incremental ``step_forward``
+(inference) are exactly equivalent by causal invariance (V3 spec section
+23), regardless of cache mode (V3 spec section 24).
+
 Author: BUEORM
 License: AGPL-3.0
 """
 
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+from __future__ import annotations
+
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -18,16 +33,10 @@ from engrama.trace import EngramaCache
 
 
 class EngramaModel(nn.Module):
-    """ENGRAMA Architecture Integrator Model.
-
-    Combines:
-    1. Isolated Token Encoder (Phase 1)
-    2. Incremental Logarithmic Circular Cache Trace (Phase 2)
-    3. Positional Dilated Gated Consolidation Stack (Phase 3)
-    4. Multi-Candidate Memory Evoker (Phase 4)
+    """ENGRAMA architecture integrator model.
 
     Args:
-        config (EngramaConfig): Architecture configuration parameters.
+        config: Architecture configuration (see :class:`EngramaConfig`).
     """
 
     def __init__(self, config: EngramaConfig):
@@ -37,35 +46,63 @@ class EngramaModel(nn.Module):
         self.encoder = IsolatedEncoder(config)
         self.consolidation = ConsolidationStack(config)
         self.evoker = MultiCandidateEvoker(config)
+
+        if config.tie_embeddings:
+            self.output_projection: Optional[nn.Linear] = None
+        else:
+            self.output_projection = nn.Linear(
+                config.d_model, config.vocab_size, bias=False
+            )
+
         self._cache: Optional[EngramaCache] = None
 
+        # Apply the configured numeric dtype to the whole model (V3 §38).
+        dtype = config.torch_dtype()
+        if dtype != torch.float32:
+            self.to(dtype=dtype)
+
+    # ------------------------------------------------------------------
+    # Output embedding used by the evoker (tied or separate head)
+    # ------------------------------------------------------------------
+    @property
+    def output_embeddings(self) -> torch.Tensor:
+        if self.output_projection is not None:
+            return self.output_projection.weight
+        return self.embeddings.weight
+
+    # ------------------------------------------------------------------
+    # Parallel path (training / full-context inference)
+    # ------------------------------------------------------------------
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Parallel autoregressive forward pass over sequence batch.
+        """Parallel autoregressive forward pass.
 
         Args:
-            input_ids (Tensor): Input token tensor of shape (B, N).
+            input_ids: Token tensor of shape ``(B, N)``.
 
         Returns:
-            Tensor: Vocabulary logits tensor of shape (B, N, vocab_size).
+            Logits tensor of shape ``(B, N, vocab_size)``.
         """
         x = self.embeddings(input_ids)
         T0 = self.encoder(x)
         T_L = self.consolidation.forward_train(T0)
-        logits = self.evoker(T_L, self.embeddings.weight)
-        return logits
+        return self.evoker(T_L, self.output_embeddings)
 
+    # ------------------------------------------------------------------
+    # Incremental path (cached generation, V3 spec section 13)
+    # ------------------------------------------------------------------
     def step_forward(
         self, token_id: torch.Tensor, cache: EngramaCache, timestamp: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Incremental step forward pass for a single token using trace cache.
+        """Incremental forward pass for a single token using the trace cache.
 
         Args:
-            token_id (Tensor): Single token ID tensor of shape (B, 1) or (1, 1).
-            cache (EngramaCache): Trace cache instance.
-            timestamp (int): Current sequence position timestamp t.
+            token_id: Token tensor of shape ``(B, 1)`` (or ``(B,)``/scalar).
+            cache: Active :class:`EngramaCache` instance.
+            timestamp: Absolute timestamp ``t`` recorded in the trace.
 
         Returns:
-            Tuple[Tensor, Tensor]: (logits_t of shape (B, vocab_size), final_hidden_state_t of shape (B, d_model)).
+            ``(logits_t, hidden_t)`` with shapes ``(B, vocab_size)`` and
+            ``(B, d_model)``.
         """
         if token_id.dim() == 1:
             token_id = token_id.unsqueeze(1)
@@ -77,13 +114,15 @@ class EngramaModel(nn.Module):
         if t0_t.dim() == 3:
             t0_t = t0_t.squeeze(1)
 
-        t_l_t, layer_outputs = self.consolidation.step_forward(
-            cache, T0_current=t0_t, return_all_layers=True
+        t_l_t, _ = self.consolidation.step_forward(
+            cache, T0_current=t0_t, timestamp=timestamp, return_all_layers=True
         )
-        logits_t = self.evoker(t_l_t, self.embeddings.weight)
-        cache.append(t0_t, layer_outputs, timestamp)
+        logits_t = self.evoker(t_l_t, self.output_embeddings)
         return logits_t, t_l_t
 
+    # ------------------------------------------------------------------
+    # Sampling
+    # ------------------------------------------------------------------
     def _sample_next_token(
         self,
         logits: torch.Tensor,
@@ -93,13 +132,11 @@ class EngramaModel(nn.Module):
         repetition_penalty: float = 1.0,
         generated_history: Optional[List[int]] = None,
     ) -> int:
-        """Sample next token with temperature, top-k, top-p, and repetition penalty."""
+        """Sample one token with temperature / top-k / top-p / penalties."""
         if logits.dim() == 2:
             logits = logits[0]
+        logits = logits.float().clone()
 
-        logits = logits.clone()
-
-        # Repetition penalty
         if repetition_penalty != 1.0 and generated_history:
             for token in set(generated_history):
                 if logits[token] < 0:
@@ -112,16 +149,14 @@ class EngramaModel(nn.Module):
 
         logits = logits / temperature
 
-        # Top-K filtering
         if top_k is not None and top_k > 0:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits = torch.where(
                 logits < v[-1],
-                torch.tensor(-float("Inf"), device=logits.device),
+                torch.tensor(-float("inf"), device=logits.device),
                 logits,
             )
 
-        # Top-P (Nucleus) filtering
         if top_p is not None and 0.0 < top_p < 1.0:
             sorted_logits, sorted_indices = torch.sort(logits, descending=True)
             cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -129,11 +164,14 @@ class EngramaModel(nn.Module):
             sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
             sorted_indices_to_remove[..., 0] = 0
             indices_to_remove = sorted_indices[sorted_indices_to_remove]
-            logits[indices_to_remove] = -float("Inf")
+            logits[indices_to_remove] = -float("inf")
 
         probs = F.softmax(logits, dim=-1)
         return int(torch.multinomial(probs, num_samples=1).item())
 
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
     def generate(
         self,
         prompt_ids: List[int],
@@ -143,58 +181,60 @@ class EngramaModel(nn.Module):
         top_p: Optional[float] = None,
         repetition_penalty: float = 1.0,
         use_cache: bool = True,
+        eos_token_id: Optional[int] = None,
     ) -> List[int]:
-        """Autoregressively generate token sequence from prompt IDs."""
+        """Autoregressively generate tokens from prompt ids."""
         if not prompt_ids:
             prompt_ids = [2]
         generated = list(prompt_ids)
         device = next(self.parameters()).device
+        was_training = self.training
+        self.eval()
 
-        if use_cache:
-            cache = self.get_cache()
-            logits_t = None
-            for t, tok in enumerate(prompt_ids):
-                token_tensor = torch.tensor([[tok]], dtype=torch.long, device=device)
+        try:
+            if use_cache:
+                cache = self.get_cache()
+                logits_t: Optional[torch.Tensor] = None
                 with torch.no_grad():
-                    logits_t, _ = self.step_forward(token_tensor, cache, timestamp=t)
+                    for t, tok in enumerate(prompt_ids):
+                        token_tensor = torch.tensor([[tok]], dtype=torch.long, device=device)
+                        logits_t, _ = self.step_forward(token_tensor, cache, timestamp=t)
 
-            for i in range(max_new_tokens):
-                if logits_t is None:
-                    break
-                next_token = self._sample_next_token(
-                    logits_t,
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    generated_history=generated,
-                )
-                generated.append(next_token)
-                if i < max_new_tokens - 1:
-                    token_tensor = torch.tensor(
-                        [[next_token]], dtype=torch.long, device=device
-                    )
-                    with torch.no_grad():
-                        logits_t, _ = self.step_forward(
-                            token_tensor, cache, timestamp=len(prompt_ids) + i
+                    for i in range(max_new_tokens):
+                        if logits_t is None:
+                            break
+                        next_token = self._sample_next_token(
+                            logits_t, temperature, top_k, top_p,
+                            repetition_penalty, generated,
                         )
-        else:
-            for _ in range(max_new_tokens):
-                input_tensor = torch.tensor(
-                    [generated], dtype=torch.long, device=device
-                )
+                        generated.append(next_token)
+                        if eos_token_id is not None and next_token == eos_token_id:
+                            break
+                        if i < max_new_tokens - 1:
+                            token_tensor = torch.tensor(
+                                [[next_token]], dtype=torch.long, device=device
+                            )
+                            logits_t, _ = self.step_forward(
+                                token_tensor,
+                                cache,
+                                timestamp=len(prompt_ids) + i,
+                            )
+            else:
                 with torch.no_grad():
-                    logits = self.forward(input_tensor)
-                logits_t = logits[:, -1, :]
-                next_token = self._sample_next_token(
-                    logits_t,
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    repetition_penalty=repetition_penalty,
-                    generated_history=generated,
-                )
-                generated.append(next_token)
+                    for _ in range(max_new_tokens):
+                        window = generated[-self.config.context_length:]
+                        input_tensor = torch.tensor([window], dtype=torch.long, device=device)
+                        logits = self.forward(input_tensor)
+                        next_token = self._sample_next_token(
+                            logits[:, -1, :], temperature, top_k, top_p,
+                            repetition_penalty, generated,
+                        )
+                        generated.append(next_token)
+                        if eos_token_id is not None and next_token == eos_token_id:
+                            break
+        finally:
+            if was_training:
+                self.train()
 
         return generated
 
@@ -206,73 +246,88 @@ class EngramaModel(nn.Module):
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         repetition_penalty: float = 1.0,
+        eos_token_id: Optional[int] = None,
     ) -> Generator[int, None, None]:
-        """Stream generated token IDs one by one using trace cache."""
+        """Stream generated token ids one by one using the trace cache."""
         if not prompt_ids:
             prompt_ids = [2]
         generated = list(prompt_ids)
         device = next(self.parameters()).device
+        was_training = self.training
+        self.eval()
 
-        cache = self.get_cache()
-        logits_t = None
-        for t, tok in enumerate(prompt_ids):
-            token_tensor = torch.tensor([[tok]], dtype=torch.long, device=device)
+        try:
+            cache = self.get_cache()
+            logits_t: Optional[torch.Tensor] = None
             with torch.no_grad():
-                logits_t, _ = self.step_forward(token_tensor, cache, timestamp=t)
+                for t, tok in enumerate(prompt_ids):
+                    token_tensor = torch.tensor([[tok]], dtype=torch.long, device=device)
+                    logits_t, _ = self.step_forward(token_tensor, cache, timestamp=t)
 
-        for i in range(max_new_tokens):
-            if logits_t is None:
-                break
-            next_token = self._sample_next_token(
-                logits_t,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                generated_history=generated,
-            )
-            generated.append(next_token)
-            yield next_token
-
-            if i < max_new_tokens - 1:
-                token_tensor = torch.tensor(
-                    [[next_token]], dtype=torch.long, device=device
-                )
-                with torch.no_grad():
-                    logits_t, _ = self.step_forward(
-                        token_tensor, cache, timestamp=len(prompt_ids) + i
+                for i in range(max_new_tokens):
+                    if logits_t is None:
+                        break
+                    next_token = self._sample_next_token(
+                        logits_t, temperature, top_k, top_p,
+                        repetition_penalty, generated,
                     )
+                    generated.append(next_token)
+                    yield next_token
+                    if eos_token_id is not None and next_token == eos_token_id:
+                        return
+                    if i < max_new_tokens - 1:
+                        token_tensor = torch.tensor(
+                            [[next_token]], dtype=torch.long, device=device
+                        )
+                        logits_t, _ = self.step_forward(
+                            token_tensor, cache, timestamp=len(prompt_ids) + i
+                        )
+        finally:
+            if was_training:
+                self.train()
 
-    def get_cache(self, N_max: Optional[int] = None) -> EngramaCache:
-        """Instantiate and return a new EngramaCache trace buffer."""
+    # ------------------------------------------------------------------
+    # Cache management (V3 sections 12, 22, 24)
+    # ------------------------------------------------------------------
+    def get_cache(
+        self,
+        N_max: Optional[int] = None,
+        mode: Optional[str] = None,
+    ) -> EngramaCache:
+        """Instantiate a fresh cache honoring the configured cache mode."""
         max_len = N_max if N_max is not None else self.config.context_length
+        cache_mode = mode if mode is not None else self.config.cache_mode
+        horizons = self.config.cache_horizons() if cache_mode == "hierarchical" else None
         self._cache = EngramaCache(
             N_max=max_len,
             num_layers=self.config.num_consolidation_layers,
             d_model=self.config.d_model,
+            mode=cache_mode,
+            horizons=horizons,
         )
         return self._cache
 
     def reset_cache(self) -> None:
-        """Reset internal model cache reference."""
+        """Drop the internal cache reference."""
         self._cache = None
 
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
     def num_parameters(self, only_trainable: bool = False) -> int:
-        """Return parameter count of the model."""
+        """Return the parameter count of the model."""
         if only_trainable:
             return sum(p.numel() for p in self.parameters() if p.requires_grad)
         return sum(p.numel() for p in self.parameters())
 
     def inspect_trace(self, cache: EngramaCache) -> Dict[str, Any]:
-        """Inspect states and metadata inside trace cache."""
-        return {
-            "cache_length": len(cache),
-            "timestamps": list(cache.timestamps),
-            "T0_shapes": [list(t.shape) for t in cache.T0] if cache.T0 else [],
-            "Tl_shapes": [
-                [list(t.shape) for t in layer] for layer in cache.Tl
-            ] if cache.Tl else [],
-            "num_layers": cache.num_layers,
-            "d_model": cache.d_model,
-            "N_max": cache.N_max,
-        }
+        """Inspect states and metadata inside the trace cache."""
+        return cache.describe()
+
+    def describe(self) -> str:
+        """Human-readable model description."""
+        return (
+            self.config.describe()
+            + f"\n  parameters={self.num_parameters():,} "
+            f"(trainable {self.num_parameters(only_trainable=True):,})"
+        )

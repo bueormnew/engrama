@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "engrama"
-version = "0.1.0"
-description = "ENGRAMA: Non-Attention Autoregressive Neural Architecture with Isolated Encoding, Circular Trace, Dilated Causal Relative Consolidation & Multi-Candidate Evocation"
+version = "0.3.0"
+description = "ENGRAMA V3: Non-Attention Autoregressive Neural Architecture — isolated encoding, circular trace, hierarchical dyadic consolidation with factorized synapses, and multi-candidate evocation. Pure PyTorch."
 readme = "README.md"
 authors = [
   { name = "BUEORM" }
@@ -42,13 +42,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "pytest-benchmark",
 ]
 
 [project.urls]
-Homepage = "https://github.com/BUEORM/ENGRAMA"
-Repository = "https://github.com/BUEORM/ENGRAMA"
-Issues = "https://github.com/BUEORM/ENGRAMA/issues"
+Homepage = "https://github.com/bueormnew/engrama"
+Repository = "https://github.com/bueormnew/engrama"
+Issues = "https://github.com/bueormnew/engrama/issues"
 
 [project.scripts]
 engrama = "engrama.cli:main"

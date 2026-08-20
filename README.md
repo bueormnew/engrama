@@ -1,192 +1,262 @@
 # ENGRAMA 🧠⚡
 
-**ENGRAMA** es una arquitectura neuronal autorregresiva avanzada y librería de aprendizaje profundo implementada en **PyTorch puro**, diseñada sin mecanismos de atención dinámica ($QK^T$), matrices de afinidad $N \times N$ ni softmax sobre la dimensión de secuencia.
+**ENGRAMA** es una arquitectura neuronal autorregresiva **sin atención** — sin $QK^T$, sin matrices de afinidad $N \times N$, sin softmax sobre la dimensión de secuencia — implementada como librería en **PyTorch puro**. Esta versión implementa fielmente la especificación **ENGRAMA V3** (`ENGRAMA-V3-Teorica.md`).
 
 - **Autor**: BUEORM
 - **Licencia**: GNU Affero General Public License v3.0 (AGPL-3.0)
-- **Versión**: 0.1.0
+- **Versión**: 0.3.0 (arquitectura V3)
 
 ---
 
-## 🌟 Características Principales
+## 🌟 Qué es ENGRAMA V3
 
-1. **Cero Atención Dinámica ($QK^T$)**: Sustituye la complejidad cuadrática $O(N^2)$ de los Transformers por sinapsis de enrutamiento celular estático y mezclas de posición causales dilatadas.
-2. **Fase 1 - Codificación Aislada (`IsolatedEncoder`)**: Procesamiento token por token con 0% de fuga de contexto en la etapa inicial.
-3. **Fase 2 - Traza Circular Incremental (`EngramaCache`)**: Buffer circular FIFO de capacidad $N_{max}$ con timestamps exactos para inferencia incremental.
-4. **Fase 3 - Consolidación Causal Dilatada (`ConsolidationStack`)**: Mezcla relativa en offsets en potencias de 2 ($P_l(i) = [0, 1, 2, 4, 8, \dots]$) mediante compuertas latentes $d_g \ll d_{model}$.
-5. **Fase 4 - Evocador Multi-Candidato (`MultiCandidateEvoker`)**: Generación de $M \in [1, 8]$ candidatos proyectados y aglomeración de similitud mediante LogSumExp, Max o Mean.
-6. **Invarianza Causal Obligatoria**: Garantía matemática de que el paso paralelo `forward(seq)` equivale exactamente a la generación incremental `step_forward(seq)` con error $< 1e-4$.
-7. **Generación con Streaming y Muestreo Avanzado**: Soporte para muestreo Top-K, Top-P (Nucleus Sampling), temperatura, penalización de repetición y streaming de caracteres/tokens en tiempo real.
-8. **CLI Completa e Inspector Interno**: Herramientas para entrenar, evaluar, inspeccionar estados ocultos/compuertas y ejecutar suites de benchmark de latencia y memoria.
+ENGRAMA reemplaza la atención por un pipeline de 4 fases con coste $O(N)$ en entrenamiento e incremental en inferencia:
+
+| Fase | Componente | Qué hace |
+|---|---|---|
+| 1 | `IsolatedEncoder` | Codifica cada token de forma **aislada y paralela** (células + sinapsis de enrutamiento). Cero fuga de contexto en esta etapa. |
+| 2 | `CircularTrace` | Traza circular FIFO que **solo almacena** las huellas $T_0$ con timestamp exacto; nunca las transforma. |
+| 3 | `ConsolidationStack` | Mezcla causal relativa por offsets diádicos jerárquicos $D_l = \{0, 1, 2^l\}$ con **sinapsis factorizadas compartidas** $W_{a \to b} = \beta_{a \to b} \cdot I + U_l \, \mathrm{Diag}(s_{a \to b}) \, V_l^\top$ (transporte identidad) y compuerta escalar por escala $\rho_{l,p}$. |
+| 4 | `MultiCandidateEvoker` | Hasta 8 candidatos factorizados sobre un núcleo $W_{shared}$ común, agregados por `logsumexp` / `max` / `mean`. |
+
+Propiedades clave:
+
+1. **Cero atención dinámica**: la interacción temporal se realiza con pesos estáticos por offset relativo. El único softmax del modelo es el de la distribución final sobre el vocabulario.
+2. **Invarianza causal garantizada y testeada**: el forward paralelo de entrenamiento coincide con la inferencia incremental token a token con error máximo medido de **5.96e-07** (float32), en una matriz de 17 combinaciones de modos × 2 modos de caché.
+3. **Caché jerárquico de horizonte mínimo** (teorema §24): en inferencia solo se retienen `max(D_{l+1}) + 1` estados por capa. Ejemplo real con $N_{max}=256$: `[3, 5, 9, 17, 33, 65, 129, 1]` estados por capa (235 en total) frente a 256 × 8 = 2048 del caché completo → **7.8× menos estado**.
+4. **Menos parámetros que V2 con los mismos hiperparámetros**: 6.89M (V3) frente a 29.55M (V2) en la configuración de referencia `d_model=256, C=8, L=8`, gracias a las sinapsis factorizadas compartidas por capa.
+5. **Dos modos de uso**: *modo rápido* (un preset de tamaño y tus datos → modelo entrenado) y *modo experto* (control total de la arquitectura y ablaciones V2/V3 desde `EngramaConfig`).
+6. **Ecosistema completo**: entrenador con schedulers, generación con top-k/top-p/streaming, serialización, inspección de sinapsis, suite de benchmarks, CLI y suite de tests.
 
 ---
 
 ## 📦 Instalación
 
-### Desde PyPI (Producción)
+> ⚠️ El nombre `engrama` en PyPI pertenece a un paquete **no relacionado**. Instala siempre desde este repositorio:
+
 ```bash
-pip install engrama
+pip install git+https://github.com/bueormnew/engrama.git
 ```
 
-### Desde el Código Fuente
+O desde el código fuente (desarrollo):
+
 ```bash
-git clone https://github.com/BUEORM/ENGRAMA.git
-cd ENGRAMA
+git clone https://github.com/bueormnew/engrama.git
+cd engrama
 pip install -e .
 ```
 
+Única dependencia: `torch >= 2.0`.
+
 ---
 
-## 🚀 Guía Rápida de Uso
+## 🚀 Modo rápido — de texto a modelo entrenado en minutos
 
-### 1. Inicialización del Modelo y Tokenizador
+```python
+import engrama
+
+# Entrena sobre un archivo de texto (o un string) con un preset de tamaño
+run = engrama.quickstart("corpus.txt", size="small", epochs=10)
+
+print(run.summary())
+print(run.generate("Once upon a time", max_new_tokens=50, temperature=0.8, top_k=40))
+
+run.save("./mi_modelo")                 # modelo + config + tokenizador
+run2 = engrama.load_quick("./mi_modelo")  # carga posterior
+```
+
+Salida real (corpus de juguete de 1 KB, preset `tiny`, CPU, 30 épocas):
+
+```
+[ENGRAMA quickstart] size=tiny params=277,586 device=cpu samples=18 seq_len=64 lr=0.005 epochs=30
+[ENGRAMA quickstart] done: loss 3.2778 -> 2.6491
+ENGRAMA V3 | params=277,586 | d_model=64 C=2 L=6 N_max=64 | final_loss=2.6491
+```
+
+> Con 120 épocas sobre ese mismo corpus el modelo converge a loss 0.051 y reproduce el texto entrenado verbatim — es un corpus de juguete; con datos reales (p. ej. TinyStories, ver `kaggle/`) el modelo aprende estructura lingüística real.
+
+### Crear solo el modelo (sin entrenar)
+
+```python
+import engrama
+
+model = engrama.create_model(size="small", vocab_size=256)
+print(engrama.list_sizes())   # presets disponibles
+```
+
+| Preset | d_model | Células | L_enc | L | N_max | rango r |
+|---|---|---|---|---|---|---|
+| `tiny`  | 64  | 2  | 1 | 6  | 64   | 8  |
+| `small` | 128 | 4  | 1 | 8  | 256  | 16 |
+| `base`  | 256 | 8  | 2 | 8  | 256  | 32 |
+| `large` | 512 | 16 | 2 | 11 | 2048 | 32 |
+
+---
+
+## 🛠️ Modo experto — control total y ablaciones
+
+`EngramaConfig` expone cada modo de la arquitectura. El campo `version` es un **preset arquitectónico real**: `v1`/`v2` resuelven todos los modos a su forma densa y `v3` a su forma factorizada jerárquica; cualquier modo explícito **sobrescribe** al preset, lo que habilita las suites de ablación de la especificación V3 (secciones 43–44) directamente:
 
 ```python
 import torch
-from engrama import EngramaConfig, EngramaModel, EngramaTokenizer
+from engrama import EngramaConfig, EngramaModel
 
-# 1. Crear e inicializar el tokenizador de caracteres
-text_data = "Hola mundo, esta es la arquitectura neuronal ENGRAMA."
-tokenizer = EngramaTokenizer().fit_on_text(text_data)
-
-# 2. Configurar los hiperparámetros
-config = EngramaConfig(
-    vocab_size=tokenizer.vocab_size,
-    d_model=512,
-    d_gate=64,
-    d_ff=2048,
-    num_cells=16,
-    num_encoder_layers=2,
-    num_consolidation_layers=6,
-    context_length=2048,
+cfg = EngramaConfig(
+    vocab_size=128,
+    d_model=256,
+    num_cells=8,
+    context_length=256,
+    version="v3",                      # preset base
+    offset_mode="hierarchical_dyadic", # D_l = {0, 1, 2^l}
+    cache_mode="hierarchical",         # caché de horizonte mínimo
     num_candidates=4,
     candidate_aggregation="logsumexp",
+    global_anchor=False,               # ancla global g(N) (§11)
+    stable_init=True,                  # init estable s≈0, β=1 (§32)
 )
+model = EngramaModel(cfg)
+print(f"{model.num_parameters():,}")   # 6,889,102
 
-# 3. Construir el modelo PyTorch
-model = EngramaModel(config)
-print(f"Parámetros totales: {model.num_parameters():,}")
+# Inspección de la conectividad por capa
+print(cfg.get_layer_offsets(3))        # [0, 1, 8]
+print(cfg.cache_horizons())            # [3, 5, 9, 17, 33, 65, 129, 1]
+print(cfg.receptive_field()["max_reach"])  # 255
+
+# Ablación: misma escala, arquitectura V2 densa
+cfg_v2 = EngramaConfig(vocab_size=128, d_model=256, num_cells=8,
+                       context_length=256, version="v2", num_candidates=4)
+print(f"{EngramaModel(cfg_v2).num_parameters():,}")  # 29,549,952
 ```
 
----
+### Parámetros principales de `EngramaConfig`
 
-### 2. Entrenamiento con `Trainer` y `TextDataset`
+| Parámetro | Default | Descripción |
+|---|---|---|
+| `vocab_size` | 256 | Tamaño del vocabulario |
+| `d_model` | 256 | Dimensión oculta $d$ |
+| `d_gate` | 32 | Dimensión latente de compuertas $d_g \ll d$ |
+| `num_cells` | 8 | Células $C$ por capa del encoder |
+| `num_encoder_layers` | 2 | Capas de sinapsis del encoder |
+| `num_consolidation_layers` | 8 | Capas de consolidación $L$ (regla: $L \ge \lceil \log_2 N \rceil$) |
+| `context_length` | 256 | Ventana de la traza $N_{max}$ |
+| `num_candidates` | 4 | Candidatos del evocador $M \in [1, 8]$ |
+| `synapse_rank` | 32 | Rango $r$ de las sinapsis factorizadas |
+| `version` | `"v3"` | Preset: `"v1"` \| `"v2"` \| `"v3"` |
+| `synapse_mode` | preset | `"dense"` (V2) \| `"factorized"` (V3 §6) |
+| `cell_mode` | preset | `"independent"` \| `"shared_core"` (V3 §5) |
+| `offset_mode` | preset | `"dense_dilated"` \| `"hierarchical_dyadic"` \| `"binary_minimal"` |
+| `cache_mode` | preset | `"full"` \| `"hierarchical"` (V3 §12) |
+| `evoker_mode` | preset | `"dense"` \| `"factorized"` (V3 §14) |
+| `identity_transport` | preset | Ruta identidad $\beta \cdot h$ (V3 §6.4) |
+| `hierarchical_gate` | preset | Compuerta escalar $\rho_{l,p}$ (V3 §17) |
+| `global_anchor` | `False` | Ancla determinista $g(N)$ en la última capa (V3 §11) |
+| `tie_embeddings` | `True` | Cabeza de salida atada a los embeddings |
+| `dtype` | `"float32"` | Precisión del modelo (`float32/64/16`, `bfloat16`) |
+
+### Entrenamiento explícito (modo experto)
 
 ```python
-from engrama import TextDataset, Trainer
+from engrama import EngramaTokenizer, TextDataset, Trainer
 
-# Crear dataset autorregresivo a partir de un archivo o string
-dataset = TextDataset(text_data, tokenizer, sequence_length=64)
+with open("corpus.txt", encoding="utf-8") as f:
+    texto = f.read()
 
-# Inicializar entrenador con optimizador AdamW y gradient clipping
-trainer = Trainer(model, lr=1e-3, device="cuda" if torch.cuda.is_available() else "cpu")
+tokenizer = EngramaTokenizer().fit_on_text(texto)
+dataset = TextDataset(texto, tokenizer, sequence_length=128)
 
-# Entrenar por 5 épocas
-history = trainer.fit(dataset, batch_size=4, epochs=5)
-print("Pérdidas por época:", history)
+trainer = Trainer(model, lr=1e-3, scheduler="cosine", warmup_steps=200,
+                  device="cuda" if torch.cuda.is_available() else "cpu")
+history = trainer.fit(dataset, batch_size=16, epochs=10)
 ```
 
----
-
-### 3. Generación de Texto y Streaming
+### Generación
 
 ```python
 from engrama import Generator
 
-generator = Generator(model, tokenizer)
-
-# Generación estándar
-prompt = "Hola"
-completion = generator.generate(
-    prompt=prompt,
-    max_new_tokens=30,
-    temperature=0.8,
-    top_k=10,
-    top_p=0.9,
-    use_cache=True,
-)
-print("Resultado:", completion)
-
-# Streaming token a token en tiempo real
-print(prompt, end="", flush=True)
-for token_char in generator.generate_stream(prompt, max_new_tokens=20, temperature=0.7):
-    print(token_char, end="", flush=True)
-print()
+gen = Generator(model, tokenizer)
+texto = gen.generate("El gato", max_new_tokens=100,
+                     temperature=0.8, top_k=40, top_p=0.95)
+for chunk in gen.generate_stream("El gato", max_new_tokens=100):
+    print(chunk, end="", flush=True)
 ```
 
----
-
-### 4. Guardado y Carga de Checkpoints
+### Invarianza causal verificable en 5 líneas
 
 ```python
-from engrama import save_model, load_model
-
-# Guardar modelo, configuración y tokenizador
-save_model(model, save_dir="./checkpoint_engrama", tokenizer=tokenizer)
-
-# Cargar checkpoint
-model_loaded, tokenizer_loaded = load_model("./checkpoint_engrama", device="cpu")
+x = torch.randint(0, cfg.vocab_size, (2, 32))
+cache = model.get_cache(N_max=32)
+steps = [model.step_forward(x[:, t:t+1], cache, t)[0] for t in range(32)]
+inc = torch.stack(steps, dim=1)
+diff = (model(x) - inc).abs().max().item()   # float32: ~5.96e-07
 ```
 
 ---
 
-### 5. Verificación de Invarianza Causal y Benchmarks
-
-```python
-from engrama import BenchmarkSuite
-
-# 1. Verificar invarianza causal (forward paralelo vs step_forward incremental)
-causal_res = BenchmarkSuite.verify_causal_invariance(model, seq_length=20)
-print("Prueba de invarianza causal superada:", causal_res["passed"])
-print("Diferencia máxima observada:", causal_res["max_diff"])
-
-# 2. Benchmarks de latencia y memoria
-lat = BenchmarkSuite.benchmark_latency(model, seq_length=128, num_runs=5)
-mem = BenchmarkSuite.benchmark_memory(model, seq_length=128)
-print("Latencia paralelo (tok/s):", lat["parallel_tokens_per_sec"])
-print("Latencia por token incremental (tok/s):", lat["step_tokens_per_sec"])
-print("Huella de memoria (bytes):", mem["peak_memory_bytes"])
-```
-
----
-
-## 🛠️ Interfaz de Línea de Comandos (CLI)
-
-ENGRAMA incluye los comandos `engrama` y `engramacli`:
+## 💻 CLI
 
 ```bash
-# Información del entorno y la librería
-engrama info
-
-# Entrenar un modelo sobre un archivo de texto
-engrama train --text-file corpus.txt --output-dir ./mi_modelo --epochs 10 --batch-size 16
-
-# Generar texto interactivo con streaming
-engrama generate --model-dir ./mi_modelo --prompt "El futuro de la IA" --max-tokens 50 --stream
-
-# Evaluar pérdida en un conjunto de validación
-engrama evaluate --model-dir ./mi_modelo --text-file validacion.txt
-
-# Ejecutar benchmarks de rendimiento e invarianza causal
-engrama benchmark --seq-len 256 --runs 10
-
-# Inspeccionar arquitectura y activaciones del modelo
-engrama inspect --model-dir ./mi_modelo --sample-text "Prueba de inspección"
+engrama sizes      # presets de tamaño
+engrama info       # versión, autor, torch, dispositivo
+engrama train --text-file corpus.txt --size small --epochs 10 \
+              --scheduler cosine --output-dir checkpoints/mi_modelo
+engrama generate --model-dir checkpoints/mi_modelo --prompt "Hola" --stream
+engrama evaluate --model-dir checkpoints/mi_modelo --text-file valid.txt
+engrama inspect --model-dir checkpoints/mi_modelo --sample-text "Hola"
+engrama benchmark --size small --seq-len 256 --runs 10
 ```
 
 ---
 
-## 🧪 Pruebas Unitarias
+## ✅ Verificación
 
-Para ejecutar la suite completa de pruebas unitarias:
+Todo número de este repositorio proviene de ejecuciones reales (política de honestidad §56 de la especificación):
+
+- **68 tests** (`python -m unittest discover` dentro de `tests/`, ~14 s en CPU): presets de versión, validación de config, primitivas (sinapsis factorizadas, compuerta desde la fuente, transporte identidad exacto), encoder/traza, matriz de invarianza causal de 17 modos × 2 cachés, evocador, tokenizador/dataset y ecosistema de entrenamiento.
+- **Invarianza causal**: error máximo 5.96e-07 (float32) entre forward paralelo e incremental, incluido el régimen de desborde FIFO cuando el cono de dependencias cabe en la ventana retenida.
+- **Transporte identidad (§31)**: con $s = 0, \beta = 1$ la sinapsis transporta el vector *exactamente* (error 0.0).
+- **Benchmark de recuperación clave–valor de largo alcance**: ver `benchmarks/KV_RETRIEVAL_REPORT.md` (script: `benchmarks/kv_retrieval.py`). Tarea sintética con bindings aleatorios por muestra (imposible memorizar); compara `hierarchical_dyadic` vs `dense_dilated` a distancias de hasta ~176 tokens. Los resultados son honestos: confirman el riesgo principal señalado por la propia especificación (§42) y motivan la ablación con ancla global.
 
 ```bash
-python -m unittest discover -s tests
+cd tests && python -m unittest discover -q   # 68 tests
+python benchmarks/kv_retrieval.py --steps 600 --seed 1234
+```
+
+---
+
+## 📁 Estructura del repositorio
+
+```
+engrama/
+├── src/engrama/            # la librería
+│   ├── config.py           # EngramaConfig + presets v1/v2/v3 + presets de tamaño
+│   ├── primitives.py       # células, sinapsis (densa/factorizada), shared-core
+│   ├── encoder.py          # Fase 1: codificación aislada
+│   ├── trace.py            # Fase 2: traza circular + caché jerárquico
+│   ├── consolidation.py    # Fase 3: mezcla diádica relativa + sinapsis factorizadas
+│   ├── evoker.py           # Fase 4: evocador multi-candidato
+│   ├── model.py            # EngramaModel (forward, step_forward, generate)
+│   ├── trainer.py          # Trainer (AdamW, clipping, warmup/cosine)
+│   ├── inference.py        # Generator (top-k/top-p/streaming)
+│   ├── tokenizer.py        # tokenizador de caracteres
+│   ├── datasets.py         # TextDataset autorregresivo
+│   ├── serialization.py    # save/load (modelo + config + tokenizador)
+│   ├── inspection.py       # EngramaInspector (fidelidad de sinapsis §50)
+│   ├── benchmarks.py       # BenchmarkSuite de latencia/estado de caché
+│   ├── quick.py            # modo rápido: quickstart / create_model / QuickRun
+│   └── cli.py              # CLI `engrama`
+├── tests/                  # 68 tests (unittest)
+├── benchmarks/             # benchmark KV de largo alcance + reporte real
+├── examples/               # ejemplos ejecutables
+├── docs/                   # guía completa + verificación
+├── kaggle/                 # notebook TinyStories (GPU opcional)
+├── ENGRAMA-V3-Teorica.md   # especificación V3 implementada
+├── ENGRAMA-Paper-Final-Verificado.md  # paper V1+V2 (referencia)
+└── README.md
 ```
 
 ---
 
 ## 📜 Licencia
 
-Este proyecto está bajo la Licencia **GNU Affero General Public License v3.0 (AGPL-3.0)**.
-Derechos de autor (C) 2026 **BUEORM**.
+GNU Affero General Public License v3.0 — ver `LICENSE`. Autor: **BUEORM**.
