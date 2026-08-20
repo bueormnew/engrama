@@ -1,26 +1,14 @@
-"""ENGRAMA V3 Primitive Blocks.
+"""ENGRAMA Primitive Blocks (V3 + V4).
 
-Implements the primitive blocks of the ENGRAMA V3 specification
-(``ENGRAMA-V3-Teorica.md``, sections 5, 6, 7 and 32):
+Implements the primitive blocks of ENGRAMA:
 
 - :class:`EngramaLayerNorm` -- per-vector LayerNorm (no cross-position ops).
-- :class:`Cell` -- V2/V3 cell: ``x + W2 * act(W1 * LN(x))``.
-- :class:`SharedCoreCellGroup` -- V3 section 5 shared-core cells with
-  per-cell diagonal modulation ``x + s_b (.) F_l(n_b (.) x + q_b)``.
-- :class:`SynapseLayer` -- the C x C synaptic routing layer of the encoder.
-
-V3 factorized synapse (spec sections 6-7), shared bases per layer::
-
-    q_a       = P_g h_a                        (once per source cell)
-    alpha_ab  = sigmoid(w_ab . q_a + b_ab)     (gate from the SOURCE)
-    W_ab h    = beta_ab * h + U Diag(s_ab) V^T h
-    o_ab      = alpha_ab (.) W_ab h_a
-    u_b       = sum_a o_ab
-
-with ``U, V in R^{d x r}`` shared by all synapses of the layer and
-``s_ab in R^r``, ``beta_ab in R`` exclusive per synapse. ``r << d``.
-
-Everything is fully vectorized: no per-synapse Python loops.
+- :class:`EngramaRMSNorm` -- per-vector RMSNorm (V4 default, preserves feature signs).
+- :class:`Cell` -- V2/V3/V4 cell: ``x + W2 * act(W1 * Norm(x))``.
+- :class:`SharedCoreCellGroup` -- shared-core cells with per-cell diagonal modulation
+  ``x + s_b (.) F_l(n_b (.) x + q_b)``.
+- :class:`SynapseLayer` -- the C x C synaptic routing layer of the isolated encoder
+  (fully vectorized tensor contraction, zero Python loops).
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -45,6 +33,15 @@ def _activation(name: str) -> nn.Module:
     raise ValueError(f"Unsupported activation: {name!r}")
 
 
+def _norm(name: str, d_model: int) -> nn.Module:
+    n = name.lower()
+    if n == "rmsnorm":
+        return EngramaRMSNorm(d_model)
+    if n == "layernorm":
+        return EngramaLayerNorm(d_model)
+    raise ValueError(f"Unsupported norm_type: {name!r}")
+
+
 class EngramaLayerNorm(nn.Module):
     """LayerNorm over the last dimension only (never across positions)."""
 
@@ -61,8 +58,22 @@ class EngramaLayerNorm(nn.Module):
         return (x - mean) / torch.sqrt(var + self.eps) * self.gamma + self.beta
 
 
+class EngramaRMSNorm(nn.Module):
+    """Root Mean Square Layer Normalization over the last dimension only (V4)."""
+
+    def __init__(self, d_model: int, eps: float = 1e-6):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(d_model))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return x * rms * self.gamma
+
+
 class Cell(nn.Module):
-    """ENGRAMA Cell: ``Cell(x) = x + W2 * act(W1 * LN(x))`` (paper section 4.1)."""
+    """ENGRAMA Cell: ``Cell(x) = x + W2 * act(W1 * Norm(x))``."""
 
     def __init__(
         self,
@@ -70,20 +81,22 @@ class Cell(nn.Module):
         d_ff: int,
         dropout: float = 0.0,
         activation: str = "gelu",
+        norm_type: str = "layernorm",
     ):
         super().__init__()
-        self.ln = EngramaLayerNorm(d_model)
+        self.norm = _norm(norm_type, d_model)
+        self.ln = self.norm  # Alias for backward compatibility
         self.w1 = nn.Linear(d_model, d_ff)
         self.w2 = nn.Linear(d_ff, d_model)
         self.act = _activation(activation)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.w2(self.dropout(self.act(self.w1(self.ln(x)))))
+        return x + self.w2(self.dropout(self.act(self.w1(self.norm(x)))))
 
 
 class SharedCoreCellGroup(nn.Module):
-    """V3 shared-core cell group (spec section 5.1).
+    """Shared-core cell group (V3/V4).
 
     A single feed-forward core ``F_l`` is shared by the ``C`` cells of the
     layer; each cell keeps its identity through a diagonal modulation::
@@ -100,11 +113,13 @@ class SharedCoreCellGroup(nn.Module):
         d_ff: int,
         dropout: float = 0.0,
         activation: str = "gelu",
+        norm_type: str = "layernorm",
     ):
         super().__init__()
         self.num_cells = num_cells
         self.d_model = d_model
-        self.ln = EngramaLayerNorm(d_model)
+        self.norm = _norm(norm_type, d_model)
+        self.ln = self.norm  # Alias for backward compatibility
         self.w1 = nn.Linear(d_model, d_ff)
         self.w2 = nn.Linear(d_ff, d_model)
         self.act = _activation(activation)
@@ -116,23 +131,17 @@ class SharedCoreCellGroup(nn.Module):
 
     def forward(self, u: torch.Tensor) -> torch.Tensor:
         x_mod = self.n_mod * u + self.q_bias
-        f_out = self.w2(self.dropout(self.act(self.w1(self.ln(x_mod)))))
+        f_out = self.w2(self.dropout(self.act(self.w1(self.norm(x_mod)))))
         return u + self.s_scale * f_out
 
 
 class SynapseLayer(nn.Module):
     """C x C synaptic routing layer of the isolated encoder.
 
-    Modes (V3 spec sections 6-7, ablations of section 44):
-
-    - ``factorized`` (V3): shared bases ``U, V`` per layer, per-synapse scale
-      ``s_ab`` and identity coefficient ``beta_ab``.
+    Modes:
+    - ``factorized`` (V3/V4): shared bases ``U, V`` per layer, per-synapse scale
+      ``s_ab`` and identity coefficient ``beta_ab``. Fully vectorized.
     - ``dense`` (V2): one dense matrix ``W_ab in R^{d x d}`` per synapse.
-
-    In both modes the gate is computed from the **source** cell state, once
-    per source (spec section 7)::
-
-        alpha_{a->b} = sigmoid(w_ab . (P_g h_a) + b_ab)
 
     Input/output shape: ``(B, N, C, d)`` or ``(B, C, d)``.
     """
@@ -150,6 +159,7 @@ class SynapseLayer(nn.Module):
         identity_transport: bool = True,
         cell_mode: str = "shared_core",
         stable_init: bool = True,
+        norm_type: str = "layernorm",
     ):
         super().__init__()
         if synapse_mode not in ("dense", "factorized"):
@@ -171,7 +181,7 @@ class SynapseLayer(nn.Module):
         self.gate_b = nn.Parameter(torch.zeros(num_cells, num_cells))
 
         if synapse_mode == "factorized":
-            # Shared transformation bases for the layer (V3 spec 6.2).
+            # Shared transformation bases for the layer.
             self.U = nn.Parameter(torch.randn(d_model, self.synapse_rank) * 0.01)
             self.V = nn.Parameter(torch.randn(d_model, self.synapse_rank) * 0.01)
             # Per-synapse specialization in the shared basis.
@@ -182,12 +192,10 @@ class SynapseLayer(nn.Module):
                     torch.randn(num_cells, num_cells, self.synapse_rank) * 0.02
                 )
             if identity_transport:
-                # Identity route (V3 spec 6.4 / 16): start as transport.
                 self.beta = nn.Parameter(torch.ones(num_cells, num_cells))
             else:
                 self.register_parameter("beta", None)
         else:
-            # V2 dense synapses: one W_ab matrix per (a, b) pair.
             scale = d_model ** -0.5
             self.w_dense = nn.Parameter(
                 torch.randn(num_cells, num_cells, d_model, d_model) * scale
@@ -200,17 +208,21 @@ class SynapseLayer(nn.Module):
                 d_ff=d_ff,
                 dropout=dropout,
                 activation=activation,
+                norm_type=norm_type,
             )
             self.cells: Optional[nn.ModuleList] = None
         else:
             self.cell_group = None
             self.cells = nn.ModuleList(
-                [Cell(d_model, d_ff, dropout, activation) for _ in range(num_cells)]
+                [
+                    Cell(d_model, d_ff, dropout, activation, norm_type=norm_type)
+                    for _ in range(num_cells)
+                ]
             )
 
     # ------------------------------------------------------------------
     def gates(self, H: torch.Tensor) -> torch.Tensor:
-        """Gate tensor ``alpha[b, n, a, c]`` from the source cells (spec 7)."""
+        """Gate tensor ``alpha[b, n, a, c]`` from the source cells."""
         q = self.p_g(H)  # (B, N, C, d_g) -- one projection per source cell
         return torch.sigmoid(
             torch.einsum("bnas,acs->bnac", q, self.gate_w) + self.gate_b
@@ -226,14 +238,14 @@ class SynapseLayer(nn.Module):
             alpha_beta = alpha * self.beta  # (B, N, Ca, Cb)
         else:
             alpha_beta = alpha
-        u = torch.matmul(alpha_beta.transpose(-1, -2), H)  # (B, N, Cb, d)
+        u_id = torch.matmul(alpha_beta.transpose(-1, -2), H)  # (B, N, Cb, d)
 
-        # Low-rank route: u_lr[c] = sum_a alpha_ab * U (s_ab (.) z_a).
-        for a in range(self.num_cells):
-            spread = z[:, :, a, :].unsqueeze(2) * self.s_scale[a]  # (B, N, Cb, r)
-            gated = alpha[:, :, a, :].unsqueeze(-1) * spread  # (B, N, Cb, r)
-            u = u + gated @ self.U.T  # (B, N, Cb, d)
-        return u
+        # Fully vectorized tensor contraction over source cells (zero Python loops)
+        spread = z.unsqueeze(3) * self.s_scale.unsqueeze(0).unsqueeze(0)  # (B, N, Ca, Cb, r)
+        gated = alpha.unsqueeze(-1) * spread  # (B, N, Ca, Cb, r)
+        gated_sum = gated.sum(dim=2)  # (B, N, Cb, r)
+        u_lr = gated_sum @ self.U.T  # (B, N, Cb, d)
+        return u_id + u_lr
 
     def _mix_dense(self, H: torch.Tensor) -> torch.Tensor:
         """u_b = sum_a alpha_ab (.) (W_ab h_a) with dense per-synapse matrices."""
@@ -266,7 +278,7 @@ class SynapseLayer(nn.Module):
         return out
 
     def identity_fidelity(self) -> float:
-        """Mean |beta| of the identity route (inspection helper, spec 31/50)."""
+        """Mean |beta| of the identity route (inspection helper)."""
         if self.beta is None:
             return 0.0
         return float(self.beta.detach().abs().mean().item())

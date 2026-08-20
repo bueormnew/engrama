@@ -7,6 +7,20 @@ from engrama.config import VERSION_PRESETS, EngramaConfig
 
 
 class TestVersionPresets(unittest.TestCase):
+    def test_v4_preset_resolution(self):
+        cfg = EngramaConfig(version="v4")
+        self.assertEqual(cfg.synapse_mode, "factorized")
+        self.assertEqual(cfg.cell_mode, "shared_core")
+        self.assertEqual(cfg.offset_mode, "resonant_multirate")
+        self.assertEqual(cfg.cache_mode, "hierarchical")
+        self.assertEqual(cfg.evoker_mode, "factorized")
+        self.assertEqual(cfg.candidate_aggregation, "latent_fusion")
+        self.assertTrue(cfg.identity_transport)
+        self.assertTrue(cfg.hierarchical_gate)
+        self.assertEqual(cfg.gating_mode, "dual")
+        self.assertTrue(cfg.trace_tap)
+        self.assertEqual(cfg.norm_type, "rmsnorm")
+
     def test_v3_preset_resolution(self):
         cfg = EngramaConfig(version="v3")
         self.assertEqual(cfg.synapse_mode, "factorized")
@@ -50,7 +64,7 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             EngramaConfig(candidate_aggregation="softmax")
         with self.assertRaises(ValueError):
-            EngramaConfig(version="v4")
+            EngramaConfig(version="v99")
         with self.assertRaises(ValueError):
             EngramaConfig(offset_mode="spiral")
         with self.assertRaises(ValueError):
@@ -139,7 +153,7 @@ class TestSizePresets(unittest.TestCase):
     def test_all_presets_construct(self):
         for size in ("tiny", "small", "base", "large"):
             cfg = EngramaConfig.preset(size)
-            self.assertEqual(cfg.version, "v3")
+            self.assertEqual(cfg.version, "v4")
             rf = cfg.receptive_field()
             self.assertTrue(
                 rf["covers_context"],

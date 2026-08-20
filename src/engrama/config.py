@@ -1,19 +1,21 @@
-"""ENGRAMA Configuration Module (V3).
+"""ENGRAMA Configuration Module (V3 + V4).
 
-Implements the configuration surface defined by ENGRAMA V3
-(``ENGRAMA-V3-Teorica.md``, sections 26, 27, 38, 54 and 55):
+Implements the configuration surface defined by ENGRAMA:
 
-- ``version`` is a *real* architecture preset: ``"v2"`` resolves every
-  architecture mode to its V2 form (dense synapses, dense dilated offsets,
-  full cache, independent cells, dense evoker) and ``"v3"`` to the V3 form
-  (factorized synapses with identity transport, hierarchical dyadic offsets,
-  hierarchical minimum-horizon cache, shared-core cells, factorized evoker).
-  Any mode passed explicitly overrides the preset, which enables the ablation
-  suites of V3 sections 43-44 directly from the config object.
+- ``version`` is an architecture preset:
+  - ``"v1"`` / ``"v2"``: dense synapses, dense dilated offsets, full cache,
+    independent cells, dense evoker.
+  - ``"v3"``: factorized synapses with identity transport, hierarchical dyadic
+    offsets, hierarchical minimum-horizon cache, shared-core cells, factorized
+    evoker (mean/logsumexp/max).
+  - ``"v4"``: resonant multi-rate offsets, dual target-source gating, direct
+    trace tap (pristine T0 bypass), RMSNorm and latent-fusion evoker
+    (O(|V|d) cost, zero gradient checkpoints).
+  Any mode passed explicitly overrides the preset, enabling full ablations.
 - ``cache_mode`` selects ``"full"`` (V2 causal cache) or ``"hierarchical"``
-  (V3 minimum-horizon cache, theorem of V3 section 24).
-- Depth rule (V3 section 26): ``num_consolidation_layers >= ceil(log2(N))``
-  for full binary coverage. Violations emit a descriptive warning.
+  (minimum-horizon cache, theorem of V3 section 24).
+- Depth rule: ``num_consolidation_layers >= ceil(log2(N))`` for full binary
+  coverage. Violations emit a descriptive warning.
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -24,20 +26,27 @@ from __future__ import annotations
 import json
 import math
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# Version presets (V3 spec, section 54)
+# Version presets
 # ---------------------------------------------------------------------------
 
 _SYNAPSE_MODES = ("dense", "factorized")
 _CELL_MODES = ("independent", "shared_core")
-_OFFSET_MODES = ("dense_dilated", "hierarchical_dyadic", "binary_minimal")
+_OFFSET_MODES = (
+    "dense_dilated",
+    "hierarchical_dyadic",
+    "binary_minimal",
+    "resonant_multirate",
+)
 _CACHE_MODES = ("full", "hierarchical")
 _EVOKER_MODES = ("dense", "factorized")
-_AGGREGATIONS = ("max", "logsumexp", "mean")
+_AGGREGATIONS = ("max", "logsumexp", "mean", "latent_fusion")
 _ACTIVATIONS = ("gelu", "relu", "silu")
+_GATING_MODES = ("source", "dual")
+_NORM_TYPES = ("layernorm", "rmsnorm")
 _DTYPE_MAP = {
     "float32": "float32",
     "float64": "float64",
@@ -46,16 +55,18 @@ _DTYPE_MAP = {
 }
 
 VERSION_PRESETS: Dict[str, Dict[str, Any]] = {
-    # V1 shares the V2 dense parameterization (the library implements the
-    # cached algorithm of V2 for both); it is kept for provenance.
     "v1": {
         "synapse_mode": "dense",
         "cell_mode": "independent",
         "offset_mode": "dense_dilated",
         "cache_mode": "full",
         "evoker_mode": "dense",
+        "candidate_aggregation": "logsumexp",
         "identity_transport": False,
         "hierarchical_gate": False,
+        "gating_mode": "source",
+        "trace_tap": False,
+        "norm_type": "layernorm",
     },
     "v2": {
         "synapse_mode": "dense",
@@ -63,8 +74,12 @@ VERSION_PRESETS: Dict[str, Dict[str, Any]] = {
         "offset_mode": "dense_dilated",
         "cache_mode": "full",
         "evoker_mode": "dense",
+        "candidate_aggregation": "logsumexp",
         "identity_transport": False,
         "hierarchical_gate": False,
+        "gating_mode": "source",
+        "trace_tap": False,
+        "norm_type": "layernorm",
     },
     "v3": {
         "synapse_mode": "factorized",
@@ -72,8 +87,25 @@ VERSION_PRESETS: Dict[str, Dict[str, Any]] = {
         "offset_mode": "hierarchical_dyadic",
         "cache_mode": "hierarchical",
         "evoker_mode": "factorized",
+        "candidate_aggregation": "logsumexp",
         "identity_transport": True,
         "hierarchical_gate": True,
+        "gating_mode": "source",
+        "trace_tap": False,
+        "norm_type": "layernorm",
+    },
+    "v4": {
+        "synapse_mode": "factorized",
+        "cell_mode": "shared_core",
+        "offset_mode": "resonant_multirate",
+        "cache_mode": "hierarchical",
+        "evoker_mode": "factorized",
+        "candidate_aggregation": "latent_fusion",
+        "identity_transport": True,
+        "hierarchical_gate": True,
+        "gating_mode": "dual",
+        "trace_tap": True,
+        "norm_type": "rmsnorm",
     },
 }
 
@@ -86,7 +118,7 @@ class EngramaConfig:
 
     Every architecture mode may be left as ``None`` to inherit the value
     prescribed by the ``version`` preset, or set explicitly to compose any
-    V2/V3 ablation (V3 spec, sections 43-44 and 54).
+    V2/V3/V4 ablation.
 
     Args:
         vocab_size: Vocabulary size. Default: 256.
@@ -99,25 +131,28 @@ class EngramaConfig:
         context_length: Trace window ``N_max``. Default: 256.
         offsets: Explicit offset family (only used by ``dense_dilated``).
         num_candidates: Evoker candidates ``M in [1, 8]``. Default: 4.
-        candidate_aggregation: ``"max"`` | ``"logsumexp"`` | ``"mean"``.
+        candidate_aggregation: ``"latent_fusion"`` | ``"mean"`` | ``"logsumexp"`` | ``"max"``.
         activation: ``"gelu"`` | ``"relu"`` | ``"silu"``.
         dropout: Dropout probability. Default: 0.0.
         dtype: Model/trace precision. Default: ``"float32"``.
-        version: Architecture preset: ``"v1"`` | ``"v2"`` | ``"v3"``.
+        version: Architecture preset: ``"v1"`` | ``"v2"`` | ``"v3"`` | ``"v4"``.
         tie_embeddings: Tie evoker projection to input embeddings.
-        synapse_mode: ``"dense"`` (V2) or ``"factorized"`` (V3 section 6).
+        synapse_mode: ``"dense"`` (V2) or ``"factorized"`` (V3/V4).
         synapse_rank: Low-rank dimension ``r << d``. Default: 32.
-        identity_transport: Enable the identity route ``beta * h`` (V3 §6.4).
-        cell_mode: ``"independent"`` or ``"shared_core"`` (V3 section 5).
-        offset_mode: ``"dense_dilated"`` | ``"hierarchical_dyadic"`` |
-            ``"binary_minimal"`` (V3 section 27).
+        identity_transport: Enable the identity route ``beta * h``.
+        cell_mode: ``"independent"`` or ``"shared_core"``.
+        offset_mode: ``"resonant_multirate"`` | ``"hierarchical_dyadic"`` |
+            ``"binary_minimal"`` | ``"dense_dilated"``.
         global_anchor: Add deterministic global anchor ``g(N)`` at the last
-            consolidation layer (V3 section 11). Default: False.
-        evoker_mode: ``"dense"`` | ``"factorized"`` (V3 section 14).
-        cache_mode: ``"full"`` (V2) | ``"hierarchical"`` (V3 section 12).
-        hierarchical_gate: Scalar per-scale gate ``rho`` (V3 section 17).
+            consolidation layer. Default: False.
+        evoker_mode: ``"dense"`` | ``"factorized"``.
+        cache_mode: ``"full"`` (V2) | ``"hierarchical"`` (V3/V4).
+        hierarchical_gate: Scalar per-scale gate ``rho``.
         stable_init: Initialize synapses near the identity route
-            (``s ~ 0``, ``beta = 1``), per V3 section 32. Default: True.
+            (``s ~ 0``, ``beta = 1``). Default: True.
+        gating_mode: ``"source"`` (V3 source-only) or ``"dual"`` (V4 target-source bilinear).
+        trace_tap: Direct trace access (T0 pristine memory tap in consolidation).
+        norm_type: Normalization function: ``"rmsnorm"`` (V4) or ``"layernorm"`` (V2/V3).
     """
 
     vocab_size: int = 256
@@ -130,11 +165,11 @@ class EngramaConfig:
     context_length: int = 256
     offsets: Optional[List[int]] = None
     num_candidates: int = 4
-    candidate_aggregation: str = "logsumexp"
+    candidate_aggregation: Optional[str] = None
     activation: str = "gelu"
     dropout: float = 0.0
     dtype: str = "float32"
-    version: str = "v3"
+    version: str = "v4"
     tie_embeddings: bool = True
 
     # --- Architecture modes (None => inherit from the version preset) ------
@@ -148,6 +183,9 @@ class EngramaConfig:
     cache_mode: Optional[str] = None
     hierarchical_gate: Optional[bool] = None
     stable_init: bool = True
+    gating_mode: Optional[str] = None
+    trace_tap: Optional[bool] = None
+    norm_type: Optional[str] = None
 
     def __post_init__(self) -> None:
         # -- resolve version presets (explicit values win) ------------------
@@ -162,8 +200,12 @@ class EngramaConfig:
             "offset_mode",
             "cache_mode",
             "evoker_mode",
+            "candidate_aggregation",
             "identity_transport",
             "hierarchical_gate",
+            "gating_mode",
+            "trace_tap",
+            "norm_type",
         ):
             if getattr(self, field_name) is None:
                 setattr(self, field_name, preset[field_name])
@@ -207,6 +249,10 @@ class EngramaConfig:
             raise ValueError(f"cache_mode must be one of {_CACHE_MODES}")
         if self.evoker_mode not in _EVOKER_MODES:
             raise ValueError(f"evoker_mode must be one of {_EVOKER_MODES}")
+        if self.gating_mode not in _GATING_MODES:
+            raise ValueError(f"gating_mode must be one of {_GATING_MODES}")
+        if self.norm_type not in _NORM_TYPES:
+            raise ValueError(f"norm_type must be one of {_NORM_TYPES}")
         if self.dtype not in _DTYPE_MAP:
             raise ValueError(f"dtype must be one of {tuple(_DTYPE_MAP)}")
         if self.offsets is None:
@@ -214,12 +260,16 @@ class EngramaConfig:
         if any(o < 0 for o in self.offsets):
             raise ValueError("All positional offsets must be non-negative (>= 0)")
 
-        # -- depth rule (V3 spec, section 26): L >= ceil(log2(N)) -----------
-        if self.offset_mode in ("hierarchical_dyadic", "binary_minimal"):
+        # -- depth rule: L >= ceil(log2(N)) ---------------------------------
+        if self.offset_mode in (
+            "hierarchical_dyadic",
+            "binary_minimal",
+            "resonant_multirate",
+        ):
             required_layers = max(1, math.ceil(math.log2(max(2, self.context_length))))
             if self.num_consolidation_layers < required_layers and not self.global_anchor:
                 warnings.warn(
-                    f"[ENGRAMA] Depth rule (V3 spec 26): with "
+                    f"[ENGRAMA] Depth rule: with "
                     f"num_consolidation_layers={self.num_consolidation_layers} and "
                     f"offset_mode='{self.offset_mode}' the binary receptive field "
                     f"covers ~{self.receptive_field()['max_reach']} positions, below "
@@ -229,7 +279,7 @@ class EngramaConfig:
                 )
 
     # ------------------------------------------------------------------
-    # Offset families and receptive field (V3 spec, sections 8, 25, 26, 27)
+    # Offset families and receptive field
     # ------------------------------------------------------------------
     def get_layer_offsets(
         self, layer_idx: int, total_layers: Optional[int] = None
@@ -261,10 +311,21 @@ class EngramaConfig:
                 res = [0, dyadic]
             else:
                 res = [0, 1]
+        elif self.offset_mode == "resonant_multirate":
+            if layer_idx == 0:
+                res = [0, 1]
+            else:
+                res = [0, 1]
+                p_prev = 2 ** (layer_idx - 1)
+                p_curr = 2 ** layer_idx
+                if p_prev < self.context_length:
+                    res.append(p_prev)
+                if p_curr < self.context_length:
+                    res.append(p_curr)
         else:  # pragma: no cover - guarded by __post_init__
             res = list(self.offsets)
 
-        # Global anchor only on the last layer (V3 spec, section 11).
+        # Global anchor only on the last layer (V3/V4 spec).
         if self.global_anchor and layer_idx == total_layers - 1:
             anchor = self.context_length - 1
             if anchor > 0 and anchor not in res:
@@ -277,12 +338,7 @@ class EngramaConfig:
         return [self.get_layer_offsets(l) for l in range(self.num_consolidation_layers)]
 
     def receptive_field(self) -> Dict[str, Any]:
-        """Compute the exact reachable offset set of the consolidation stack.
-
-        Returns a dict with the maximum reachable distance, whether coverage
-        is dense over ``[0, max]``, the required layers for full binary
-        coverage of ``context_length`` and the per-layer offsets.
-        """
+        """Compute the exact reachable offset set of the consolidation stack."""
         reachable = {0}
         for layer_idx in range(self.num_consolidation_layers):
             offsets = self.get_layer_offsets(layer_idx)
@@ -301,7 +357,7 @@ class EngramaConfig:
         }
 
     def cache_horizons(self) -> List[int]:
-        """Minimum retained states per consolidation layer (V3 §12 teorema 2).
+        """Minimum retained states per consolidation layer.
 
         ``horizons[l]`` is the number of entries the buffer of layer output
         ``T_l`` must retain so that layer ``l + 1`` can still read all its
@@ -334,12 +390,7 @@ class EngramaConfig:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "EngramaConfig":
-        """Construct configuration from a dictionary.
-
-        Unknown keys are ignored for forward compatibility with configs saved
-        by newer library versions, but a descriptive warning is emitted so
-        typos do not pass silently.
-        """
+        """Construct configuration from a dictionary."""
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         unknown = sorted(set(d) - known)
         if unknown:
@@ -364,38 +415,32 @@ class EngramaConfig:
         return cls.from_dict(data)
 
     # ------------------------------------------------------------------
-    # Size presets (quick mode) -- V3 spec, section 38 spirit
+    # Size presets (quick mode)
     # ------------------------------------------------------------------
     @classmethod
     def preset(cls, size: str, **overrides: Any) -> "EngramaConfig":
-        """Return a ready-to-train preset configuration.
-
-        Sizes follow the V3 recommended-profile spirit (section 38): dyadic
-        offsets, factorized synapses with identity transport and a depth that
-        satisfies the ``L >= ceil(log2(N))`` coverage rule for the preset
-        context length unless overridden.
-        """
+        """Return a ready-to-train preset configuration."""
         size = size.lower()
         presets: Dict[str, Dict[str, Any]] = {
             "tiny": dict(
                 d_model=64, d_gate=8, d_ff=256, num_cells=2,
                 num_encoder_layers=1, num_consolidation_layers=6,
-                context_length=64, synapse_rank=8,
+                context_length=64, synapse_rank=8, version="v4",
             ),
             "small": dict(
                 d_model=128, d_gate=16, d_ff=512, num_cells=4,
                 num_encoder_layers=1, num_consolidation_layers=8,
-                context_length=256, synapse_rank=16,
+                context_length=256, synapse_rank=16, version="v4",
             ),
             "base": dict(
                 d_model=256, d_gate=32, d_ff=1024, num_cells=8,
                 num_encoder_layers=2, num_consolidation_layers=8,
-                context_length=256, synapse_rank=32,
+                context_length=256, synapse_rank=32, version="v4",
             ),
             "large": dict(
                 d_model=512, d_gate=64, d_ff=2048, num_cells=16,
                 num_encoder_layers=2, num_consolidation_layers=11,
-                context_length=2048, synapse_rank=32,
+                context_length=2048, synapse_rank=32, version="v4",
             ),
         }
         if size not in presets:
@@ -416,7 +461,10 @@ class EngramaConfig:
             f"  synapse_mode={self.synapse_mode} (r={self.synapse_rank}, "
             f"identity_transport={self.identity_transport})",
             f"  cell_mode={self.cell_mode} offset_mode={self.offset_mode} "
-            f"cache_mode={self.cache_mode} evoker_mode={self.evoker_mode}",
+            f"cache_mode={self.cache_mode} evoker_mode={self.evoker_mode} "
+            f"candidate_aggregation={self.candidate_aggregation}",
+            f"  gating_mode={self.gating_mode} trace_tap={self.trace_tap} "
+            f"norm_type={self.norm_type}",
             f"  hierarchical_gate={self.hierarchical_gate} "
             f"global_anchor={self.global_anchor} stable_init={self.stable_init}",
             f"  receptive_field: max_reach={rf['max_reach']} "

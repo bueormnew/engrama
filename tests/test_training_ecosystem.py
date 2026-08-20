@@ -142,7 +142,7 @@ class TestQuickAPI(unittest.TestCase):
         self.assertEqual(len(run.history), 2)
         self.assertLess(run.history[-1], run.history[0])
         self.assertIsInstance(run.generate("el cielo", max_new_tokens=4), str)
-        self.assertIn("ENGRAMA V3", run.summary())
+        self.assertIn("ENGRAMA", run.summary())
         with tempfile.TemporaryDirectory() as tmp:
             run.save(tmp)
             run2 = engrama.load_quick(tmp)

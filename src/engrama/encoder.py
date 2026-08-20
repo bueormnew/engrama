@@ -8,7 +8,7 @@ Each token is encoded independently of its neighbors:
 
 Because no operation mixes positions, ``T_0[i]`` depends exclusively on
 ``x_i`` (isolated encoding theorem, V1/V2 paper section 5.1; untouched by
-V3) and the whole sequence encodes in parallel.
+V3/V4) and the whole sequence encodes in parallel.
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -45,6 +45,7 @@ class IsolatedEncoder(nn.Module):
                     identity_transport=config.identity_transport,
                     cell_mode=config.cell_mode,
                     stable_init=config.stable_init,
+                    norm_type=config.norm_type or "layernorm",
                 )
                 for _ in range(config.num_encoder_layers)
             ]
