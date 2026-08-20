@@ -19,7 +19,7 @@ Two usage modes of the library:
    modes, identity transport, hierarchical gates, global anchor, ranks...)
    is configurable, enabling the V3 ablation suites directly.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

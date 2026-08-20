@@ -7,8 +7,9 @@ name = "engrama"
 version = "0.3.0"
 description = "ENGRAMA V3: Non-Attention Autoregressive Neural Architecture — isolated encoding, circular trace, hierarchical dyadic consolidation with factorized synapses, and multi-candidate evocation. Pure PyTorch."
 readme = "README.md"
+requires-python = ">=3.9"
 authors = [
-  { name = "BUEORM" }
+  { name = "Gerson Fabian Buenahora Ormaza (BUEORM)" }
 ]
 license = { text = "AGPL-3.0-or-later" }
 keywords = [
@@ -26,7 +27,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

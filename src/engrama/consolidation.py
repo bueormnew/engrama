@@ -22,7 +22,7 @@ vectorized over offsets and exactly equivalent (causal invariance, V3
 spec section 23 / theorem 1; minimum-horizon correctness, section 24 /
 theorem 2).
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

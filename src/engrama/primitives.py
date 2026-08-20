@@ -22,7 +22,7 @@ with ``U, V in R^{d x r}`` shared by all synapses of the layer and
 
 Everything is fully vectorized: no per-synapse Python loops.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

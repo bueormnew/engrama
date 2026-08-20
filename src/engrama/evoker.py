@@ -15,7 +15,7 @@ sections 14.2 / 37: candidates are aggregated **before** the vocabulary
 projection, reducing the dominant cost from ``O(M |V| d)`` to ``O(|V| d)``
 with mathematically identical results (linearity of the mean).
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

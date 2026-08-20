@@ -15,7 +15,7 @@ Implements the configuration surface defined by ENGRAMA V3
 - Depth rule (V3 section 26): ``num_consolidation_layers >= ceil(log2(N))``
   for full binary coverage. Violations emit a descriptive warning.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -334,8 +334,20 @@ class EngramaConfig:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "EngramaConfig":
-        """Construct configuration from a dictionary, ignoring unknown keys."""
+        """Construct configuration from a dictionary.
+
+        Unknown keys are ignored for forward compatibility with configs saved
+        by newer library versions, but a descriptive warning is emitted so
+        typos do not pass silently.
+        """
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
+        unknown = sorted(set(d) - known)
+        if unknown:
+            warnings.warn(
+                f"[ENGRAMA] EngramaConfig.from_dict ignoring unknown key(s): "
+                f"{unknown}. Known keys: {sorted(known)}",
+                stacklevel=2,
+            )
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
 

@@ -1,6 +1,6 @@
 """
 ENGRAMA Model Serialization Module
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 

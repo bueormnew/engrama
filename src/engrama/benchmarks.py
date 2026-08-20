@@ -4,7 +4,7 @@ Latency, memory and causal-invariance measurements. Memory reporting is
 explicit about what is measured on each device (model weights vs. true
 CUDA peak allocations vs. cache footprint).
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
@@ -26,31 +26,40 @@ class BenchmarkSuite:
     def benchmark_latency(
         model: EngramaModel, seq_length: int = 256, num_runs: int = 10
     ) -> Dict[str, Any]:
-        """Benchmark parallel forward vs cached step-by-step generation."""
+        """Benchmark parallel forward vs cached step-by-step generation.
+
+        The model is switched to eval mode for the duration of the benchmark
+        and restored to its previous mode afterwards.
+        """
+        was_training = model.training
         model.eval()
         device = next(model.parameters()).device
         input_ids = torch.randint(
             0, model.config.vocab_size, (1, seq_length), device=device, dtype=torch.long
         )
 
-        with torch.no_grad():
-            model(input_ids)  # warmup
+        try:
+            with torch.no_grad():
+                model(input_ids)  # warmup
 
-            start = time.perf_counter()
-            for _ in range(num_runs):
-                model(input_ids)
-            if device.type == "cuda":
-                torch.cuda.synchronize(device)
-            t_parallel = time.perf_counter() - start
+                start = time.perf_counter()
+                for _ in range(num_runs):
+                    model(input_ids)
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                t_parallel = time.perf_counter() - start
 
-            start = time.perf_counter()
-            for _ in range(num_runs):
-                cache = model.get_cache(N_max=seq_length)
-                for t in range(seq_length):
-                    model.step_forward(input_ids[:, t : t + 1], cache, t)
-            if device.type == "cuda":
-                torch.cuda.synchronize(device)
-            t_step = time.perf_counter() - start
+                start = time.perf_counter()
+                for _ in range(num_runs):
+                    cache = model.get_cache(N_max=seq_length)
+                    for t in range(seq_length):
+                        model.step_forward(input_ids[:, t : t + 1], cache, t)
+                if device.type == "cuda":
+                    torch.cuda.synchronize(device)
+                t_step = time.perf_counter() - start
+        finally:
+            if was_training:
+                model.train()
 
         total_tokens = num_runs * seq_length
         return {
@@ -68,44 +77,59 @@ class BenchmarkSuite:
     def benchmark_memory(
         model: EngramaModel, seq_length: int = 256
     ) -> Dict[str, Any]:
-        """Memory footprint report (weights, cache, and true peaks on CUDA)."""
+        """Memory footprint report (weights, cache, and true peaks on CUDA).
+
+        The model is switched to eval mode for the duration of the benchmark
+        and restored to its previous mode afterwards.
+        """
+        was_training = model.training
         model.eval()
         device = next(model.parameters()).device
         num_params = model.num_parameters()
         params_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
 
-        cache = model.get_cache(N_max=seq_length)
-        with torch.no_grad():
-            for t in range(seq_length):
-                model.step_forward(torch.zeros(1, 1, dtype=torch.long, device=device), cache, t)
-        cache_bytes = cache.get_memory_footprint()
-
-        result: Dict[str, Any] = {
-            "device": str(device),
-            "num_parameters": num_params,
-            "parameter_bytes": int(params_bytes),
-            "cache_bytes_at_seq": int(cache_bytes),
-            "cache_mode": cache.mode,
-            "seq_length": seq_length,
-        }
-
-        if device.type == "cuda" and torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats(device)
-            input_ids = torch.randint(
-                0, model.config.vocab_size, (1, seq_length),
-                device=device, dtype=torch.long,
-            )
+        try:
+            cache = model.get_cache(N_max=seq_length)
             with torch.no_grad():
-                model(input_ids)
-            result["peak_forward_bytes_cuda"] = int(torch.cuda.max_memory_allocated(device))
-        else:
-            # Honest estimate on CPU: PyTorch does not expose allocator peaks;
-            # report weights + cache instead of pretending to measure peaks.
-            result["peak_forward_bytes_cuda"] = None
-            result["note"] = (
-                "CPU execution: exact activation peaks are not exposed by the "
-                "allocator; parameter_bytes and cache_bytes_at_seq are exact."
-            )
+                for t in range(seq_length):
+                    model.step_forward(
+                        torch.zeros(1, 1, dtype=torch.long, device=device), cache, t
+                    )
+            cache_bytes = cache.get_memory_footprint()
+
+            result: Dict[str, Any] = {
+                "device": str(device),
+                "num_parameters": num_params,
+                "parameter_bytes": int(params_bytes),
+                "cache_bytes_at_seq": int(cache_bytes),
+                "cache_mode": cache.mode,
+                "seq_length": seq_length,
+            }
+
+            if device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats(device)
+                input_ids = torch.randint(
+                    0, model.config.vocab_size, (1, seq_length),
+                    device=device, dtype=torch.long,
+                )
+                with torch.no_grad():
+                    model(input_ids)
+                result["peak_forward_bytes_cuda"] = int(
+                    torch.cuda.max_memory_allocated(device)
+                )
+            else:
+                # Honest estimate on CPU: PyTorch does not expose allocator
+                # peaks; report weights + cache instead of pretending to
+                # measure peaks.
+                result["peak_forward_bytes_cuda"] = None
+                result["note"] = (
+                    "CPU execution: exact activation peaks are not exposed by "
+                    "the allocator; parameter_bytes and cache_bytes_at_seq "
+                    "are exact."
+                )
+        finally:
+            if was_training:
+                model.train()
         return result
 
     # ------------------------------------------------------------------

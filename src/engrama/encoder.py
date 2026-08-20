@@ -10,7 +10,7 @@ Because no operation mixes positions, ``T_0[i]`` depends exclusively on
 ``x_i`` (isolated encoding theorem, V1/V2 paper section 5.1; untouched by
 V3) and the whole sequence encodes in parallel.
 
-Author: BUEORM
+Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
 """
 
