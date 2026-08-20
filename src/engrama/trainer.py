@@ -27,14 +27,14 @@ _LARGE_VOCAB_THRESHOLD = 16384
 def _cross_entropy(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """Cross-entropy, memory-friendly for large vocabularies.
 
-    Always computed in fp32: AMP fp16 ``log_softmax`` over a large
-    vocabulary overflows to NaN (the Kaggle TinyStories run died at
-    step ~350 with ``loss nan`` and samples of ``!!!!`` = GPT-2 id 0).
+    Large vocabs go through :func:`chunked_cross_entropy`, which upcasts
+    each vocabulary slice to fp32 (never a full ``(N, V)`` clone). Small
+    vocabs use fused ``F.cross_entropy`` in fp32.
     """
-    if logits.dtype in (torch.float16, torch.bfloat16):
-        logits = logits.float()
     if logits.size(-1) > _LARGE_VOCAB_THRESHOLD:
         return chunked_cross_entropy(logits, targets)
+    if logits.dtype in (torch.float16, torch.bfloat16):
+        logits = logits.float()
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
 

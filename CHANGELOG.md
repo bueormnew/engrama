@@ -17,12 +17,15 @@ versionado semántico (semver).
   - `clip_grad_norm_` sobre grads Inf (`inf * 0 = nan`) envenenaba Adam
     aunque GradScaler intentara saltar el paso.
   - GEMM fp16 con reducción fp16 + warmup de 200 pasos + `beta2=0.999`.
-  Receta (arquitectura intacta): CE en fp32 con `chunked_cross_entropy`,
+  Receta (arquitectura intacta): CE por trozos en fp32 (upcast **por
+  chunk de 2048, sin clonar** el `(B,N,V)` — pico extra ~64 MiB frente
+  a ~1.6 GiB de `logits.float()` o del `log_softmax` de `F.cross_entropy`),
   pasos no-finitos se saltan, GEMM con acumulador fp32, AdamW
   `betas=(0.9, 0.95)`, `lr=3e-4`, warmup 500, GradScaler `init_scale=2**12`.
-- `losses.chunked_cross_entropy` y `Trainer`: upcast automático fp16/bf16
-  → fp32 antes de la CE (el mismo overflow no puede colarse por el
-  Trainer).
+  El forward AMP fp16 no cambia: el paso sigue en ~0.4 s, la CE es <10 ms.
+- `losses.chunked_cross_entropy` y `Trainer`: mismos acumuladores fp32
+  por trozo (el overflow no puede colarse por el Trainer, y no se duplica
+  el vocabulario en VRAM).
 
 ### Corregido (memoria y notebooks Kaggle)
 
