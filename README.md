@@ -249,7 +249,7 @@ engrama/
 ├── benchmarks/             # benchmark KV de largo alcance + reporte real
 ├── examples/               # ejemplos ejecutables
 ├── docs/                   # guía completa + verificación
-├── kaggle/                 # notebook TinyStories (GPU opcional)
+├── kaggle/                 # notebooks TinyStories (char y ~20M con GPT-2, GPU recomendada)
 ├── ENGRAMA-V3-Teorica.md   # especificación V3 implementada
 ├── ENGRAMA-Paper-Final-Verificado.md  # paper V1+V2 (referencia)
 └── README.md
