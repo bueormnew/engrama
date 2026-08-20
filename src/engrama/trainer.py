@@ -25,7 +25,14 @@ _LARGE_VOCAB_THRESHOLD = 16384
 
 
 def _cross_entropy(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    """Cross-entropy, memory-friendly for large vocabularies."""
+    """Cross-entropy, memory-friendly for large vocabularies.
+
+    Always computed in fp32: AMP fp16 ``log_softmax`` over a large
+    vocabulary overflows to NaN (the Kaggle TinyStories run died at
+    step ~350 with ``loss nan`` and samples of ``!!!!`` = GPT-2 id 0).
+    """
+    if logits.dtype in (torch.float16, torch.bfloat16):
+        logits = logits.float()
     if logits.size(-1) > _LARGE_VOCAB_THRESHOLD:
         return chunked_cross_entropy(logits, targets)
     return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
@@ -122,7 +129,7 @@ class Trainer:
             if self.use_amp:
                 with torch.cuda.amp.autocast(dtype=torch.float16):
                     logits = self.model(input_ids)
-                    loss = _cross_entropy(logits, target_ids)
+                loss = _cross_entropy(logits, target_ids)
                 self.scaler.scale(loss).backward()
                 if self.gradient_clip and self.gradient_clip > 0:
                     self.scaler.unscale_(self.optimizer)

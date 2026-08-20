@@ -58,6 +58,12 @@ def chunked_cross_entropy(
     if reduction not in ("mean", "sum", "none"):
         raise ValueError("reduction must be 'mean', 'sum' or 'none'")
 
+    # fp16 log-sum-exp over a GPT-2-sized vocabulary overflows to Inf/NaN
+    # (seen as a hard NaN ~step 350 under AMP). Upcast is cheap: the
+    # chunked path never materializes a (N, V) softmax.
+    if logits.dtype in (torch.float16, torch.bfloat16):
+        logits = logits.float()
+
     flat = logits.reshape(-1, logits.size(-1))
     n, vocab = flat.shape
     flat_targets = targets.reshape(-1)
