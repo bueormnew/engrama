@@ -40,6 +40,13 @@ from engrama.config import EngramaConfig
 from engrama.primitives import Cell
 
 
+def _sigmoid(x: torch.Tensor) -> torch.Tensor:
+    """Sigmoid in fp32 under AMP so dual-gating pre-activations cannot saturate to 0/1 inf."""
+    if x.dtype in (torch.float16, torch.bfloat16):
+        return torch.sigmoid(x.float()).to(x.dtype)
+    return torch.sigmoid(x)
+
+
 class PositionalDilatedMix(nn.Module):
     """Positional dilated mix with factorized fidelity transport and dual gating."""
 
@@ -206,9 +213,9 @@ class PositionalDilatedMix(nn.Module):
                 bilinear = (Q_tgt * k_s).sum(dim=-1, keepdim=True) * scale_dg
                 g_tgt = Q_tgt @ self.gate_w_tgt[str_p]
                 g_src = k_s @ self.gate_w_src[str_p]
-                g = torch.sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
+                g = _sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
             else:
-                g = torch.sigmoid(k_s @ self.gate_w_src[str_p] + self.gate_b[str_p])
+                g = _sigmoid(k_s @ self.gate_w_src[str_p] + self.gate_b[str_p])
 
             # Context transformation
             if self.synapse_mode == "factorized" and z_s is not None:
@@ -241,7 +248,7 @@ class PositionalDilatedMix(nn.Module):
                 y_total = y_ctx
 
             if self.hierarchical_gate and self.rho is not None:
-                rho_p = torch.sigmoid(self.rho[str_p])
+                rho_p = _sigmoid(self.rho[str_p])
             else:
                 rho_p = 1.0
 
@@ -280,9 +287,9 @@ class PositionalDilatedMix(nn.Module):
                 bilinear = (q_tgt * k_src).sum(dim=-1, keepdim=True) * scale_dg
                 g_tgt = q_tgt @ self.gate_w_tgt[str_p]
                 g_src = k_src @ self.gate_w_src[str_p]
-                g = torch.sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
+                g = _sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
             else:
-                g = torch.sigmoid(k_src @ self.gate_w_src[str_p] + self.gate_b[str_p])
+                g = _sigmoid(k_src @ self.gate_w_src[str_p] + self.gate_b[str_p])
 
             if self.synapse_mode == "factorized":
                 z_s = src_state @ self.V
@@ -309,7 +316,7 @@ class PositionalDilatedMix(nn.Module):
                 y_total = y_ctx
 
             if self.hierarchical_gate and self.rho is not None:
-                rho_p = torch.sigmoid(self.rho[str_p])
+                rho_p = _sigmoid(self.rho[str_p])
             else:
                 rho_p = 1.0
 
