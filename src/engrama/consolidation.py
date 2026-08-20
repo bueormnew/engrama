@@ -1,26 +1,27 @@
-"""ENGRAMA V3 Consolidation Stack (Phase 3).
+"""ENGRAMA Consolidation Stack (Phase 3).
 
-Implements the hierarchical dilated causal consolidation of the V3 spec
-(sections 8, 10, 17):
+Implements the hierarchical causal consolidation of ENGRAMA (V3 + V4):
 
 ::
 
-    T_pos_l[i] = sum_{p in D_l, p <= i} rho_{l,p} * G_{l,p}(T_{l-1}[i-p])
+    T_pos_l[i] = sum_{p in D_l, p <= i} rho_{l,p} * G_{l,p}(T_{l-1}[i-p], T_0[i-p])
 
-    G_{l,p}(x)   = alpha_{l,p}(x) (.) (beta_{l,p} x + U_l Diag(s_{l,p}) V_l^T x)
+    G_{l,p}(x, t0) = alpha_{l,p}(.) (y_context + gamma_{l,p} * y_trace)
 
-    T_l[i]       = Cell_l(T_pos_l[i])
+    y_context      = beta_{l,p} x + U_l Diag(s_{l,p}) V_l^T x
+    y_trace        = beta_tr_{l,p} t0 + U_tr Diag(s_tr_{l,p}) V_tr^T t0
 
-where ``alpha_{l,p}`` is a per-channel gate computed from the **source**
-state (spec section 7), ``rho_{l,p} = sigmoid(a_{l,p})`` is the scalar
-per-scale gate (spec section 17), and ``U_l, V_l in R^{d x r}`` are the
-shared bases of the layer (spec section 8.2, 35).
+    T_l[i]         = Cell_l(T_pos_l[i])
 
-Both paths -- parallel training (``forward_train``) and token-by-token
-inference with minimum-horizon windows (``forward_step``) -- are fully
-vectorized over offsets and exactly equivalent (causal invariance, V3
-spec section 23 / theorem 1; minimum-horizon correctness, section 24 /
-theorem 2).
+Gating Modes:
+- ``dual`` (V4 default): Bilinear target-source point-to-point gating:
+  ``alpha = sigmoid(q_tgt . k_src / sqrt(d_g) + q_tgt W_tgt + k_src W_src + b)``.
+  No attention matrix, no softmax over sequence, strictly O(N) linear time.
+- ``source`` (V3): Source-only gate ``alpha = sigmoid(k_src W_src + b)``.
+
+Both parallel training (``forward_train``) and incremental inference with
+minimum-horizon windows (``forward_step``) are fully vectorized and exactly
+equivalent by causal invariance.
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -28,9 +29,11 @@ License: AGPL-3.0
 
 from __future__ import annotations
 
+import math
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from engrama.config import EngramaConfig
@@ -38,20 +41,7 @@ from engrama.primitives import Cell
 
 
 class PositionalDilatedMix(nn.Module):
-    """V3 positional dilated mix with factorized fidelity transport.
-
-    Params per layer (offsets ``D_l``):
-
-    - ``p_g``: gate projection ``d -> d_g`` (shared, per source).
-    - ``gate_w[p] in R^{d_g x d}``, ``gate_b[p] in R^d``: per-channel gate.
-    - ``U_l, V_l in R^{d x r}``: shared low-rank bases (spec section 8.2).
-    - ``s_scale[p] in R^r`` and ``beta[p] in R``: per-offset specialization
-      and identity route (spec sections 6, 10, 16).
-    - ``rho[p] in R``: scalar per-scale gate (spec section 17), only when
-      ``hierarchical_gate=True``.
-    - ``w_dense[p] in R^{d x d}``: dense ablation (``synapse_mode="dense"``,
-      spec ablation B/D of section 44).
-    """
+    """Positional dilated mix with factorized fidelity transport and dual gating."""
 
     def __init__(
         self,
@@ -63,6 +53,8 @@ class PositionalDilatedMix(nn.Module):
         identity_transport: bool = True,
         hierarchical_gate: bool = True,
         stable_init: bool = True,
+        gating_mode: str = "dual",
+        trace_tap: bool = True,
     ):
         super().__init__()
         if synapse_mode not in ("dense", "factorized"):
@@ -71,18 +63,24 @@ class PositionalDilatedMix(nn.Module):
             raise ValueError("offsets must be a non-empty list")
         if any(o < 0 for o in offsets):
             raise ValueError("offsets must be non-negative and causal (>= 0)")
+        if gating_mode not in ("source", "dual"):
+            raise ValueError(f"gating_mode must be 'source' or 'dual', got {gating_mode!r}")
 
         self.d_model = d_model
         self.d_gate = d_gate
         self.offsets = sorted(dict.fromkeys(int(p) for p in offsets))
+        self.num_offsets = len(self.offsets)
         self.synapse_mode = synapse_mode
         self.synapse_rank = min(synapse_rank, d_model)
         self.identity_transport = identity_transport
         self.hierarchical_gate = hierarchical_gate
+        self.gating_mode = gating_mode
+        self.trace_tap = trace_tap
         self.max_offset = max(self.offsets)
 
-        self.p_g = nn.Linear(d_model, d_gate, bias=False)
-        self.gate_w = nn.ParameterDict(
+        # Source gating projection (shared per source state)
+        self.p_g_src = nn.Linear(d_model, d_gate, bias=False)
+        self.gate_w_src = nn.ParameterDict(
             {
                 str(p): nn.Parameter(torch.randn(d_gate, d_model) * 0.02)
                 for p in self.offsets
@@ -91,6 +89,19 @@ class PositionalDilatedMix(nn.Module):
         self.gate_b = nn.ParameterDict(
             {str(p): nn.Parameter(torch.zeros(d_model)) for p in self.offsets}
         )
+
+        # Target gating projection for Dual Target-Source Gating (V4)
+        if gating_mode == "dual":
+            self.p_g_tgt = nn.Linear(d_model, d_gate, bias=False)
+            self.gate_w_tgt = nn.ParameterDict(
+                {
+                    str(p): nn.Parameter(torch.randn(d_gate, d_model) * 0.02)
+                    for p in self.offsets
+                }
+            )
+        else:
+            self.p_g_tgt = None
+            self.gate_w_tgt = None
 
         if synapse_mode == "factorized":
             self.U = nn.Parameter(torch.randn(d_model, self.synapse_rank) * 0.01)
@@ -120,6 +131,29 @@ class PositionalDilatedMix(nn.Module):
                 }
             )
 
+        # Direct Trace Tap (V4): pristine memory bypass parameters
+        if trace_tap and synapse_mode == "factorized":
+            self.U_tr = nn.Parameter(torch.randn(d_model, self.synapse_rank) * 0.01)
+            self.V_tr = nn.Parameter(torch.randn(d_model, self.synapse_rank) * 0.01)
+            self.s_scale_tr = nn.ParameterDict(
+                {
+                    str(p): nn.Parameter(torch.zeros(self.synapse_rank))
+                    for p in self.offsets
+                }
+            )
+            self.beta_tr = nn.ParameterDict(
+                {str(p): nn.Parameter(torch.ones(1) * 0.5) for p in self.offsets}
+            )
+            self.gamma_tr = nn.ParameterDict(
+                {str(p): nn.Parameter(torch.ones(1) * 0.1) for p in self.offsets}
+            )
+        else:
+            self.U_tr = None
+            self.V_tr = None
+            self.s_scale_tr = None
+            self.beta_tr = None
+            self.gamma_tr = None
+
         if hierarchical_gate:
             self.rho = nn.ParameterDict(
                 {str(p): nn.Parameter(torch.zeros(1)) for p in self.offsets}
@@ -128,101 +162,168 @@ class PositionalDilatedMix(nn.Module):
             self.rho = None  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
-    # Shared math
+    # Parallel training path: T_prev (B, N, d), T_0 (B, N, d) -> T_pos (B, N, d)
     # ------------------------------------------------------------------
-    def _transform(self, x: torch.Tensor, str_p: str) -> torch.Tensor:
-        """beta_p * x + U Diag(s_p) V^T x (factorized) or W_p x (dense)."""
-        if self.synapse_mode == "factorized":
-            low_rank = ((x @ self.V) * self.s_scale[str_p]) @ self.U.T
-            if self.identity_transport and self.beta is not None:
-                return self.beta[str_p] * x + low_rank
-            return low_rank
-        return x @ self.w_dense[str_p]
-
-    def _gate(self, x: torch.Tensor, str_p: str) -> torch.Tensor:
-        """Per-channel sigmoid gate computed from the source state."""
-        q = self.p_g(x)
-        return torch.sigmoid(q @ self.gate_w[str_p] + self.gate_b[str_p])
-
-    def _scale_gate(self, str_p: str) -> Union[torch.Tensor, float]:
-        """Scalar per-scale gate rho (spec section 17); 1.0 when disabled."""
-        if self.hierarchical_gate and self.rho is not None:
-            return torch.sigmoid(self.rho[str_p])
-        return 1.0
-
-    # ------------------------------------------------------------------
-    # Parallel training path: T_prev (B, N, d) -> T_pos (B, N, d)
-    # ------------------------------------------------------------------
-    def forward_train(self, T_prev: torch.Tensor) -> torch.Tensor:
+    def forward_train(
+        self, T_prev: torch.Tensor, T_0: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         b, n, d = T_prev.shape
         t_pos = torch.zeros_like(T_prev)
+        scale_dg = 1.0 / math.sqrt(self.d_gate)
+
+        # Pre-project linearly once per layer (saves redundant matmuls)
+        if self.synapse_mode == "factorized":
+            Z_prev = T_prev @ self.V
+        else:
+            Z_prev = None
+
+        K_src = self.p_g_src(T_prev)
+        if self.gating_mode == "dual" and self.p_g_tgt is not None:
+            Q_tgt = self.p_g_tgt(T_prev)
+        else:
+            Q_tgt = None
+
+        if self.trace_tap and T_0 is not None and self.V_tr is not None:
+            Z_0 = T_0 @ self.V_tr
+        else:
+            Z_0 = None
+
         for p in self.offsets:
             str_p = str(p)
             if p == 0:
-                t_shifted = T_prev
+                t_s = T_prev
+                k_s = K_src
+                z_s = Z_prev
             elif p < n:
-                t_shifted = torch.cat(
-                    [
-                        torch.zeros(b, p, d, device=T_prev.device, dtype=T_prev.dtype),
-                        T_prev[:, :-p, :],
-                    ],
-                    dim=1,
-                )
+                t_s = F.pad(T_prev[:, :-p, :], (0, 0, p, 0))
+                k_s = F.pad(K_src[:, :-p, :], (0, 0, p, 0))
+                z_s = F.pad(Z_prev[:, :-p, :], (0, 0, p, 0)) if Z_prev is not None else None
             else:
-                continue  # causal mask: p > i never contributes
-            g = self._gate(t_shifted, str_p)
-            y = self._transform(t_shifted, str_p)
-            t_pos = t_pos + self._scale_gate(str_p) * g * y
+                continue  # causal availability: p > i never contributes
+
+            # Gating calculation
+            if self.gating_mode == "dual" and Q_tgt is not None and self.gate_w_tgt is not None:
+                bilinear = (Q_tgt * k_s).sum(dim=-1, keepdim=True) * scale_dg
+                g_tgt = Q_tgt @ self.gate_w_tgt[str_p]
+                g_src = k_s @ self.gate_w_src[str_p]
+                g = torch.sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
+            else:
+                g = torch.sigmoid(k_s @ self.gate_w_src[str_p] + self.gate_b[str_p])
+
+            # Context transformation
+            if self.synapse_mode == "factorized" and z_s is not None:
+                low_rank = (z_s * self.s_scale[str_p]) @ self.U.T
+                if self.identity_transport and self.beta is not None:
+                    y_ctx = self.beta[str_p] * t_s + low_rank
+                else:
+                    y_ctx = low_rank
+            else:
+                y_ctx = t_s @ self.w_dense[str_p]
+
+            # Direct Trace Tap contribution (V4)
+            if self.trace_tap and T_0 is not None and Z_0 is not None and self.U_tr is not None:
+                if p == 0:
+                    t0_s = T_0
+                    z0_s = Z_0
+                elif p < n:
+                    t0_s = F.pad(T_0[:, :-p, :], (0, 0, p, 0))
+                    z0_s = F.pad(Z_0[:, :-p, :], (0, 0, p, 0))
+                else:
+                    t0_s = z0_s = None
+
+                if t0_s is not None and z0_s is not None:
+                    low_rank_tr = (z0_s * self.s_scale_tr[str_p]) @ self.U_tr.T
+                    y_tr = self.beta_tr[str_p] * t0_s + low_rank_tr
+                    y_total = y_ctx + self.gamma_tr[str_p] * y_tr
+                else:
+                    y_total = y_ctx
+            else:
+                y_total = y_ctx
+
+            if self.hierarchical_gate and self.rho is not None:
+                rho_p = torch.sigmoid(self.rho[str_p])
+            else:
+                rho_p = 1.0
+
+            t_pos = t_pos + rho_p * (g * y_total)
+
         return t_pos
 
     # ------------------------------------------------------------------
-    # Incremental path: end-relative reads from a retained window.
-    # ``history``: newest-last list of (B, d) states of the PREVIOUS level.
+    # Incremental path: end-relative reads from retained windows.
     # ------------------------------------------------------------------
-    def forward_step(self, history: Sequence[torch.Tensor]) -> torch.Tensor:
+    def forward_step(
+        self,
+        history: Sequence[torch.Tensor],
+        trace_history: Optional[Sequence[torch.Tensor]] = None,
+    ) -> torch.Tensor:
         if not history:
             raise ValueError("forward_step requires a non-empty history window")
 
-        sources: List[torch.Tensor] = []
-        valid_params: List[str] = []
-        for p in self.offsets:
-            if p + 1 <= len(history):  # causal availability mask
-                sources.append(history[-(p + 1)])
-                valid_params.append(str(p))
-        if not sources:
-            raise ValueError("No causally available offsets in history window")
+        current_state = history[-1]
+        scale_dg = 1.0 / math.sqrt(self.d_gate)
 
-        S = torch.stack(sources, dim=1)  # (B, K, d)
-        q = self.p_g(S)  # (B, K, d_g)
-
-        gate_w = torch.stack([self.gate_w[s] for s in valid_params])  # (K, d_g, d)
-        gate_b = torch.stack([self.gate_b[s] for s in valid_params])  # (K, d)
-        g = torch.sigmoid(torch.einsum("bkg,kgd->bkd", q, gate_w) + gate_b)
-
-        if self.synapse_mode == "factorized":
-            z = S @ self.V  # (B, K, r)
-            s_vec = torch.stack([self.s_scale[s] for s in valid_params])  # (K, r)
-            y = (z * s_vec) @ self.U.T  # (B, K, d)
-            if self.identity_transport and self.beta is not None:
-                beta_vec = torch.stack([self.beta[s] for s in valid_params])  # (K, 1)
-                y = beta_vec.unsqueeze(0) * S + y
+        if self.gating_mode == "dual" and self.p_g_tgt is not None:
+            q_tgt = self.p_g_tgt(current_state)
         else:
-            w = torch.stack([self.w_dense[s] for s in valid_params])  # (K, d_in, d_out)
-            y = torch.einsum("kio,bki->bko", w, S)
+            q_tgt = None
 
-        if self.hierarchical_gate and self.rho is not None:
-            rho_vec = torch.stack([self.rho[s] for s in valid_params]).squeeze(-1)
-            rho_vec = torch.sigmoid(rho_vec)  # (K,)
-            return torch.einsum("k,bkd->bd", rho_vec, g * y)
-        return (g * y).sum(dim=1)
+        t_pos = torch.zeros_like(current_state)
+        for p in self.offsets:
+            if p + 1 > len(history):
+                continue
+            str_p = str(p)
+            src_state = history[-(p + 1)]
+            k_src = self.p_g_src(src_state)
+
+            if self.gating_mode == "dual" and q_tgt is not None and self.gate_w_tgt is not None:
+                bilinear = (q_tgt * k_src).sum(dim=-1, keepdim=True) * scale_dg
+                g_tgt = q_tgt @ self.gate_w_tgt[str_p]
+                g_src = k_src @ self.gate_w_src[str_p]
+                g = torch.sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
+            else:
+                g = torch.sigmoid(k_src @ self.gate_w_src[str_p] + self.gate_b[str_p])
+
+            if self.synapse_mode == "factorized":
+                z_s = src_state @ self.V
+                low_rank = (z_s * self.s_scale[str_p]) @ self.U.T
+                if self.identity_transport and self.beta is not None:
+                    y_ctx = self.beta[str_p] * src_state + low_rank
+                else:
+                    y_ctx = low_rank
+            else:
+                y_ctx = src_state @ self.w_dense[str_p]
+
+            if (
+                self.trace_tap
+                and trace_history is not None
+                and (p + 1 <= len(trace_history))
+                and self.U_tr is not None
+            ):
+                t0_s = trace_history[-(p + 1)]
+                z0_s = t0_s @ self.V_tr
+                low_rank_tr = (z0_s * self.s_scale_tr[str_p]) @ self.U_tr.T
+                y_tr = self.beta_tr[str_p] * t0_s + low_rank_tr
+                y_total = y_ctx + self.gamma_tr[str_p] * y_tr
+            else:
+                y_total = y_ctx
+
+            if self.hierarchical_gate and self.rho is not None:
+                rho_p = torch.sigmoid(self.rho[str_p])
+            else:
+                rho_p = 1.0
+
+            t_pos = t_pos + rho_p * (g * y_total)
+
+        return t_pos
 
     # ------------------------------------------------------------------
     def identity_fidelity(self) -> Optional[float]:
-        """Mean |beta| of identity routes (inspection helper, spec 31/50)."""
+        """Mean |beta| of identity routes (inspection helper)."""
         if self.synapse_mode != "factorized" or self.beta is None:
             return None
         return float(
-            torch.stack([self.beta[s].detach().abs() for s in self.gate_w])
+            torch.stack([self.beta[s].detach().abs() for s in self.gate_w_src])
             .mean()
             .item()
         )
@@ -244,26 +345,40 @@ class ConsolidationLayer(nn.Module):
             identity_transport=config.identity_transport,
             hierarchical_gate=config.hierarchical_gate,
             stable_init=config.stable_init,
+            gating_mode=config.gating_mode or "source",
+            trace_tap=bool(config.trace_tap),
         )
         self.cell = Cell(
-            config.d_model, config.d_ff, config.dropout, config.activation
+            config.d_model,
+            config.d_ff,
+            config.dropout,
+            config.activation,
+            norm_type=config.norm_type or "layernorm",
         )
         self.max_offset = self.mix.max_offset
 
-    def forward_train(self, T_prev: torch.Tensor) -> torch.Tensor:
-        return self.cell(self.mix.forward_train(T_prev))
+    def forward_train(
+        self, T_prev: torch.Tensor, T_0: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        return self.cell(self.mix.forward_train(T_prev, T_0=T_0))
 
-    def forward_step(self, history: Sequence[torch.Tensor]) -> torch.Tensor:
-        return self.cell(self.mix.forward_step(history))
+    def forward_step(
+        self,
+        history: Sequence[torch.Tensor],
+        trace_history: Optional[Sequence[torch.Tensor]] = None,
+    ) -> torch.Tensor:
+        return self.cell(self.mix.forward_step(history, trace_history=trace_history))
 
     def forward(
         self,
         x: Union[torch.Tensor, Sequence[torch.Tensor]],
         history: bool = False,
+        T_0: Optional[torch.Tensor] = None,
+        trace_history: Optional[Sequence[torch.Tensor]] = None,
     ) -> torch.Tensor:
         if history:
-            return self.forward_step(x)  # type: ignore[arg-type]
-        return self.forward_train(x)  # type: ignore[arg-type]
+            return self.forward_step(x, trace_history=trace_history)  # type: ignore[arg-type]
+        return self.forward_train(x, T_0=T_0)  # type: ignore[arg-type]
 
 
 class ConsolidationStack(nn.Module):
@@ -280,14 +395,19 @@ class ConsolidationStack(nn.Module):
         )
 
     # ------------------------- training --------------------------------
-    def forward_train(self, T0: torch.Tensor) -> torch.Tensor:
+    def forward_train(
+        self, T0: torch.Tensor, T0_pristine: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        pristine = T0 if T0_pristine is None else T0_pristine
         t = T0
         for layer in self.layers:
-            t = layer.forward_train(t)
+            t = layer.forward_train(t, T_0=pristine if self.config.trace_tap else None)
         return t
 
-    def forward(self, T0: torch.Tensor) -> torch.Tensor:
-        return self.forward_train(T0)
+    def forward(
+        self, T0: torch.Tensor, T0_pristine: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        return self.forward_train(T0, T0_pristine=T0_pristine)
 
     # ------------------------- incremental -----------------------------
     def step_forward(
@@ -297,12 +417,7 @@ class ConsolidationStack(nn.Module):
         timestamp: int,
         return_all_layers: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
-        """Compute T_1..T_L for the current token and write them to the cache.
-
-        The trace and every per-layer buffer are written progressively, so
-        each layer reads causally available states only -- exactly matching
-        the parallel training path (V3 spec sections 13, 23, 24).
-        """
+        """Compute T_1..T_L for current token and write them to cache."""
         cache.trace.append(T0_current, timestamp)
 
         layer_outputs: List[torch.Tensor] = []
@@ -312,7 +427,11 @@ class ConsolidationStack(nn.Module):
                 history = cache.trace_history(maxoff + 1)
             else:
                 history = cache.layer_history(l - 1, maxoff + 1)
-            t_out = layer.forward_step(history)
+
+            trace_history = (
+                cache.trace_history(maxoff + 1) if self.config.trace_tap else None
+            )
+            t_out = layer.forward_step(history, trace_history=trace_history)
             cache.states.append(l, t_out)
             layer_outputs.append(t_out)
 

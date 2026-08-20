@@ -1,8 +1,8 @@
 """ENGRAMA Trainer Module.
 
-High-level training engine with AdamW, gradient clipping and an optional
-learning-rate schedule (constant, linear-warmup, or warmup + cosine decay,
-as recommended for V3 -- see paper section 8 and V3 spec section 32).
+High-level training engine with AdamW, gradient clipping, AMP (Automatic Mixed
+Precision) and learning-rate schedules (constant, linear-warmup, or warmup +
+cosine decay).
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -11,7 +11,7 @@ License: AGPL-3.0
 from __future__ import annotations
 
 import math
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -20,9 +20,7 @@ from torch.utils.data import DataLoader, Dataset
 from engrama.losses import chunked_cross_entropy
 from engrama.model import EngramaModel
 
-# Above this vocabulary size the Trainer switches to the chunked
-# cross-entropy (see ``engrama.losses``) so large-vocab training does not
-# materialize a second full logits copy for ``log_softmax``.
+# Above this vocabulary size the Trainer switches to chunked cross-entropy
 _LARGE_VOCAB_THRESHOLD = 16384
 
 
@@ -45,6 +43,7 @@ class Trainer:
         weight_decay: AdamW weight decay. Default: 0.01.
         scheduler: ``"none"`` | ``"warmup"`` | ``"cosine"``. Default: ``"none"``.
         warmup_steps: Linear warmup steps for the chosen schedule. Default: 0.
+        use_amp: Enable Automatic Mixed Precision (FP16 on CUDA). Default: False.
     """
 
     def __init__(
@@ -57,6 +56,7 @@ class Trainer:
         weight_decay: float = 0.01,
         scheduler: str = "none",
         warmup_steps: int = 0,
+        use_amp: bool = False,
     ):
         if scheduler not in ("none", "warmup", "cosine"):
             raise ValueError("scheduler must be 'none', 'warmup' or 'cosine'")
@@ -64,6 +64,8 @@ class Trainer:
         self.gradient_clip = gradient_clip
         self.scheduler_name = scheduler
         self.warmup_steps = max(0, warmup_steps)
+        self.use_amp = bool(use_amp and self.device.type == "cuda")
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp) if self.use_amp else None
         self.model = model.to(self.device)
         if optimizer is None:
             self.optimizer = torch.optim.AdamW(
@@ -115,15 +117,30 @@ class Trainer:
 
         for batch in dataloader:
             input_ids, target_ids = self._unpack_batch(batch)
-            self.optimizer.zero_grad()
-            logits = self.model(input_ids)
-            loss = _cross_entropy(logits, target_ids)
-            loss.backward()
-            if self.gradient_clip and self.gradient_clip > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.gradient_clip
-                )
-            self.optimizer.step()
+            self.optimizer.zero_grad(set_to_none=True)
+
+            if self.use_amp:
+                with torch.cuda.amp.autocast(dtype=torch.float16):
+                    logits = self.model(input_ids)
+                    loss = _cross_entropy(logits, target_ids)
+                self.scaler.scale(loss).backward()
+                if self.gradient_clip and self.gradient_clip > 0:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.gradient_clip
+                    )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                logits = self.model(input_ids)
+                loss = _cross_entropy(logits, target_ids)
+                loss.backward()
+                if self.gradient_clip and self.gradient_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.gradient_clip
+                    )
+                self.optimizer.step()
+
             self._apply_lr(total_steps)
             self._global_step += 1
             total_loss += loss.item()
@@ -154,13 +171,7 @@ class Trainer:
         return loss_history
 
     def evaluate(self, dataset: Dataset, batch_size: int = 16) -> float:
-        """Evaluate mean cross-entropy loss on a dataset.
-
-        Targets equal to ``TextDataset.IGNORE_INDEX`` (``-100``) are excluded
-        from the loss (padding positions). The model is switched to eval mode
-        for the duration of the call and restored to its previous mode
-        afterwards.
-        """
+        """Evaluate mean cross-entropy loss on a dataset."""
         was_training = self.model.training
         self.model.eval()
         total_loss = 0.0

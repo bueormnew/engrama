@@ -99,7 +99,7 @@ class EngramaModel(nn.Module):
         """
         x = self.embeddings(input_ids)
         T0 = self.encoder(x)
-        T_L = self.consolidation.forward_train(T0)
+        T_L = self.consolidation.forward_train(T0, T0_pristine=T0)
         return self.evoker(T_L, self.output_embeddings)
 
     # ------------------------------------------------------------------

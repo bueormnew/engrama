@@ -1,19 +1,21 @@
-"""ENGRAMA V3 Multi-Candidate Evoker (Phase 4).
+"""ENGRAMA Multi-Candidate Evoker (Phase 4).
 
-Implements the evoker of V3 spec section 14:
+Implements the evoker (V3/V4):
 
 ::
 
-    c_m = W_shared h_* + U_e Diag(s_m) V_e^T h_* + b_m      (factorized, V3)
-    c_m = W_m h_* + b_m                                    (dense, V2 ablation)
+    c_m = W_shared h_* + U_e Diag(s_m) V_e^T h_* + b_m      (factorized)
+    c_m = W_m h_* + b_m                                    (dense)
 
     l_{m,v} = <c_m, E_v> / sqrt(d)
 
-with aggregation over candidates by ``max``, ``logsumexp`` (numerically
-stable) or ``mean``. The ``mean`` mode applies the V3 optimization of
-sections 14.2 / 37: candidates are aggregated **before** the vocabulary
-projection, reducing the dominant cost from ``O(M |V| d)`` to ``O(|V| d)``
-with mathematically identical results (linearity of the mean).
+Candidate aggregation modes:
+- ``latent_fusion`` (V4 default): Candidates are adaptively fused in latent space
+  via a learned gating distribution before the vocabulary projection, achieving
+  O(|V|d) cost with zero gradient checkpoints.
+- ``mean`` (V3): Arithmetic mean in latent space before vocabulary projection.
+- ``logsumexp`` / ``max``: Multi-candidate logit aggregation with chunked
+  memory guards for very large vocabularies.
 
 Author: Gerson Fabian Buenahora Ormaza (BUEORM)
 License: AGPL-3.0
@@ -31,25 +33,13 @@ from torch.utils.checkpoint import checkpoint
 
 from engrama.config import EngramaConfig
 
-# Memory guard for very large vocabularies (e.g. GPT-2's 50,257 tokens).
-#
-# The plain logsumexp/max path materializes a (..., M, V) logits tensor.
-# At batch 16 x 512 positions x 4 candidates x 50,257 vocab that is 6.6 GB
-# in fp32 -- plus softmax temporaries -- which exhausts a 16 GB T4 even
-# before the backward pass. Above this many elements the evoker switches to
-# a chunked-over-vocabulary path whose per-chunk intermediates are wrapped
-# in a gradient checkpoint: peak memory stays O(P * chunk) instead of
-# O(P * M * V), at the cost of recomputing each chunk once during backward.
+# Memory guard for very large vocabularies in logsumexp/max paths.
 _MAX_AGGREGATE_ELEMENTS = 2 ** 26  # 67M elements == 256 MB in fp32
 _EVOKER_CHUNK = 2048
 
 
 def _logsumexp_chunk(cands: torch.Tensor, weight: torch.Tensor, scale: float) -> torch.Tensor:
-    """One vocabulary chunk of the candidate logsumexp aggregation.
-
-    Inputs: ``cands`` (P, M, d), ``weight`` (c, d). Output: ``(P, c)``.
-    Pure tensor function so it can run inside a gradient checkpoint.
-    """
+    """One vocabulary chunk of the candidate logsumexp aggregation."""
     logits = F.linear(cands, weight) * scale  # (P, M, c)
     m = logits.max(dim=-2, keepdim=True).values  # (P, 1, c)
     return m.squeeze(-2) + torch.log(torch.sum(torch.exp(logits - m), dim=-2))
@@ -74,7 +64,7 @@ class MultiCandidateEvoker(nn.Module):
         self.synapse_rank = min(config.synapse_rank, config.d_model)
 
         if self.evoker_mode == "factorized":
-            # Truly shared trunk (V3 spec section 14).
+            # Shared trunk
             self.W_shared = nn.Linear(self.d_model, self.d_model, bias=False)
             self.U_e = nn.Parameter(torch.randn(self.d_model, self.synapse_rank) * 0.01)
             self.V_e = nn.Parameter(torch.randn(self.d_model, self.synapse_rank) * 0.01)
@@ -90,6 +80,11 @@ class MultiCandidateEvoker(nn.Module):
         else:  # pragma: no cover - guarded by config validation
             raise ValueError(f"Unknown evoker_mode: {self.evoker_mode!r}")
 
+        if self.aggregation == "latent_fusion":
+            self.gate_fusion = nn.Linear(self.d_model, self.num_candidates)
+        else:
+            self.gate_fusion = None
+
     # ------------------------------------------------------------------
     def candidates_forward(self, h_star: torch.Tensor) -> torch.Tensor:
         """Return all candidate vectors, shape ``(..., M, d)``."""
@@ -103,17 +98,18 @@ class MultiCandidateEvoker(nn.Module):
     def forward(
         self, h_star: torch.Tensor, embedding_weights: torch.Tensor
     ) -> torch.Tensor:
-        """Map ``h_*`` to vocabulary logits of shape ``(..., vocab_size)``.
-
-        For ``logsumexp``/``max`` with a large candidate x vocab product this
-        switches to a checkpointed chunked path (see module docstring) that
-        keeps peak memory bounded; results are identical to the plain path.
-        """
+        """Map ``h_*`` to vocabulary logits of shape ``(..., vocab_size)``."""
         scale = 1.0 / math.sqrt(self.d_model)
         cands = self.candidates_forward(h_star)  # (..., M, d)
 
+        if self.aggregation == "latent_fusion":
+            # V4 latent adaptive candidate fusion: aggregate in R^d before vocab projection
+            w = F.softmax(self.gate_fusion(h_star), dim=-1).unsqueeze(-1)  # (..., M, 1)
+            c_fused = (cands * w).sum(dim=-2)  # (..., d)
+            return F.linear(c_fused, embedding_weights) * scale
+
         if self.aggregation == "mean":
-            # V3 sections 14.2/37: aggregate first -- one vocabulary matmul.
+            # V3 section 14.2 / 37: arithmetic mean in R^d
             c_mean = cands.mean(dim=-2)  # (..., d)
             return F.linear(c_mean, embedding_weights) * scale
 
@@ -143,14 +139,7 @@ class MultiCandidateEvoker(nn.Module):
         output_shape: torch.Size,
         aggregation: str,
     ) -> torch.Tensor:
-        """Chunked candidate aggregation over the vocabulary axis.
-
-        Each chunk is evaluated through a reentrant gradient checkpoint:
-        its ``(P, M, chunk)`` intermediates are freed right after the chunk
-        and recomputed once during backward, so peak memory is bounded by
-        ``O(P * chunk)`` while the graph stays intact. The per-position
-        results are mathematically identical to the plain path.
-        """
+        """Chunked candidate aggregation over the vocabulary axis."""
         if aggregation == "logsumexp":
             fn = _logsumexp_chunk
         elif aggregation == "max":
@@ -159,15 +148,15 @@ class MultiCandidateEvoker(nn.Module):
             raise ValueError(f"Unknown aggregation: {aggregation!r}")
 
         pieces: List[torch.Tensor] = []
-        scale_t = flat_cands.new_tensor(scale)  # 0-dim tensor (checkpoint arg)
+        scale_t = flat_cands.new_tensor(scale)
         for v0 in range(0, self.vocab_size, _EVOKER_CHUNK):
             v1 = min(self.vocab_size, v0 + _EVOKER_CHUNK)
-            weight_chunk = embedding_weights[v0:v1]  # (c, d)
+            weight_chunk = embedding_weights[v0:v1]
             piece = checkpoint(
                 fn, flat_cands, weight_chunk, scale_t, use_reentrant=True
             )
-            pieces.append(piece)  # (P, c)
-        out = torch.cat(pieces, dim=-1)  # (P, V)
+            pieces.append(piece)
+        out = torch.cat(pieces, dim=-1)
         return out.reshape(output_shape[:-2] + (self.vocab_size,))
 
     # ------------------------------------------------------------------

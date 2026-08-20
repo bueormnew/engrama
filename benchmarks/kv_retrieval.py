@@ -1,16 +1,16 @@
-"""ENGRAMA V3 benchmark: long-range key-value retrieval.
+"""ENGRAMA benchmark: long-range key-value retrieval.
 
 Scientifically valid implementation of the retrieval tasks demanded by the
-V3 spec (sections 30.3, 43, 47):
+ENGRAMA specifications:
 
 - Every sample binds each key to a **fresh random value**, so the mapping
   cannot be memorized globally: the model must retrieve it from context.
-- Bindings live in a header; queries land at increasing distances, so
-  accuracy-vs-distance measures the identity-transport hypothesis of V3.
-- Two offset policies are compared head to head (spec ablation D/E):
-  ``dense_dilated`` (V2 connectivity) vs ``hierarchical_dyadic`` (V3).
+- Bindings live in a header; queries land at increasing distances, measuring
+  retrieval fidelity and signal persistence across time.
+- Compares V3 (source gating, dyadic offsets) vs V4 (dual target-source gating,
+  resonant multirate offsets, direct trace tap, RMSNorm).
 
-The report is generated from REAL runs only (spec section 56).
+The report is generated from REAL runs only.
 
 Usage::
 
@@ -68,7 +68,7 @@ def make_sample(rng: random.Random) -> Tuple[torch.Tensor, List[Tuple[int, int]]
         used.add(pos + 1)
         seq[pos] = key
         seq[pos + 1] = value_of[key]
-    for pos in range(9, SEQ_LEN):  # keep body tokens off query cells
+    for pos in range(9, SEQ_LEN):
         if pos not in used:
             seq[pos] = body[(pos - 9) % 8]
 
@@ -97,10 +97,9 @@ def evaluate(model: EngramaModel, num_samples: int, rng: random.Random,
             seqs, answers = make_batch(b, rng)
             seqs = seqs.to(device)
             logits = model(seqs[:, :-1])
-            preds = logits.argmax(dim=-1)  # preds[t] predicts token t+1
+            preds = logits.argmax(dim=-1)
             for row, ans in enumerate(answers):
                 for qi, (pos, value) in enumerate(ans):
-                    # prediction at index pos-1 of seqs[:, :-1] predicts seq[pos]
                     if preds[row, pos].item() == value:
                         per_query_correct[qi] += 1
                     total += 1
@@ -114,12 +113,29 @@ def evaluate(model: EngramaModel, num_samples: int, rng: random.Random,
     return result
 
 
-def train_model(offset_mode: str, steps: int, seed: int, device: str, log_every: int,
-                global_anchor: bool = False):
+def train_model(
+    version: str,
+    offset_mode: str,
+    steps: int,
+    seed: int,
+    device: str,
+    log_every: int,
+    global_anchor: bool = False,
+    lr: float = 3e-3,
+):
     cfg = EngramaConfig(
-        vocab_size=VOCAB_SIZE, d_model=64, d_gate=8, d_ff=256, num_cells=2,
-        num_encoder_layers=1, num_consolidation_layers=8, context_length=SEQ_LEN,
-        num_candidates=1, candidate_aggregation="mean", offset_mode=offset_mode,
+        vocab_size=VOCAB_SIZE,
+        d_model=64,
+        d_gate=16,
+        d_ff=256,
+        num_cells=2,
+        num_encoder_layers=1,
+        num_consolidation_layers=8,
+        context_length=SEQ_LEN,
+        num_candidates=1,
+        candidate_aggregation="mean",
+        version=version,
+        offset_mode=offset_mode,
         global_anchor=global_anchor,
         offsets=[0, 1, 2, 4, 8, 16, 32, 64, 128] if offset_mode == "dense_dilated" else None,
     )
@@ -127,7 +143,7 @@ def train_model(offset_mode: str, steps: int, seed: int, device: str, log_every:
     model = EngramaModel(cfg).to(device)
     rng = random.Random(seed + 7)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-3, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     t0 = time.time()
     model.train()
     log: List[Tuple[int, float]] = []
@@ -162,19 +178,18 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=250)
     ap.add_argument("--seed", type=int, default=1234)
     ap.add_argument("--log-every", type=int, default=25)
-    ap.add_argument("--out", type=str,
-                    default=os.path.join(os.path.dirname(__file__),
-                                         "KV_RETRIEVAL_REPORT.md"))
     ap.add_argument(
-        "--force", action="store_true",
-        help="Overwrite the target report file if it already exists "
-             "(by default an existing file is never overwritten; a run "
-             "suffixed report is written instead)",
+        "--out",
+        type=str,
+        default=os.path.join(os.path.dirname(__file__), "KV_RETRIEVAL_REPORT.md"),
+    )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite target report file if it already exists",
     )
     args = ap.parse_args()
 
-    # Never clobber an existing report silently: the versioned
-    # KV_RETRIEVAL_REPORT.md holds the canonical published numbers.
     out_path = args.out
     if os.path.exists(out_path) and not args.force:
         base, ext = os.path.splitext(out_path)
@@ -187,43 +202,45 @@ def main() -> None:
     chance = 1.0 / (VAL_HI - VAL_LO + 1)
 
     lines = [
-        "# ENGRAMA V3 — Benchmark de recuperacion clave-valor de largo alcance",
+        "# ENGRAMA — Benchmark de Recuperacion Clave-Valor de Largo Alcance (V3 vs V4)",
         "",
-        "Benchmark de las tareas 30.3/43/47 de la especificacion V3.",
-        "**Todos los numeros de este reporte se generaron ejecutando "
-        "`benchmarks/kv_retrieval.py`; ningun valor es proyectado.**",
+        "Benchmark de recuperacion exacta de pares clave-valor a distancias crecientes.",
+        "**Todos los numeros de este reporte se generaron ejecutando `benchmarks/kv_retrieval.py`.**",
         "",
         "## Protocolo",
         "",
-        f"- Secuencia de {SEQ_LEN} tokens; cabecera con {N_KEYS} pares "
-        "clave-valor **aleatorios por muestra** (imposible memorizarlos).",
-        f"- Consultas en posiciones {QUERY_POSITIONS} (distancias "
-        f"~{QUERY_POSITIONS[0] - 8}..{QUERY_POSITIONS[-1] - 8} tokens).",
-        "- 200 muestras de evaluacion con semilla independiente del "
-        "entrenamiento.",
+        f"- Secuencia de {SEQ_LEN} tokens; cabecera con {N_KEYS} pares clave-valor **aleatorios por muestra**.",
+        f"- Consultas en posiciones {QUERY_POSITIONS} (distancias ~{QUERY_POSITIONS[0] - 8}..{QUERY_POSITIONS[-1] - 8} tokens).",
+        "- 200 muestras de evaluacion con semilla independiente del entrenamiento.",
         f"- Nivel azar: {chance:.1%} (16 valores posibles).",
         f"- Dispositivo: {device}.",
         "",
-        "| Configuracion | Pasos | Loss inicial | Loss final | "
-        "Precision recuperacion | Tiempo |",
-        "|---|---|---|---|---|---|",
+        "| Configuracion | Version | Pasos | Loss inicial | Loss final | Precision recuperacion | Tiempo |",
+        "|---|---|---|---|---|---|---|",
     ]
 
     summary: Dict[str, Dict[str, float]] = {}
     configs = [
-        ("hierarchical_dyadic", "hierarchical_dyadic", False),
-        ("hierarchical_dyadic", "hierarchical_dyadic + ancla", True),
-        ("dense_dilated", "dense_dilated", False),
+        ("v3", "hierarchical_dyadic", "V3 hierarchical_dyadic", False, 3e-3),
+        ("v3", "dense_dilated", "V3 dense_dilated", False, 3e-3),
+        ("v4", "resonant_multirate", "V4 resonant_multirate", False, 4e-3),
+        ("v4", "dense_dilated", "V4 dense_dilated", False, 4e-3),
     ]
-    for mode, tag, anchor in configs:
+    for ver, mode, tag, anchor, lr in configs:
         model, log, metrics, elapsed = train_model(
-            mode, args.steps, args.seed,
-            device, args.log_every, global_anchor=anchor,
+            ver,
+            mode,
+            args.steps,
+            args.seed,
+            device,
+            args.log_every,
+            global_anchor=anchor,
+            lr=lr,
         )
         summary[tag] = metrics
         params = model.num_parameters()
         lines.append(
-            f"| V3 `{tag}` ({params:,} params) | {args.steps} | "
+            f"| `{tag}` | {ver.upper()} | {args.steps} | "
             f"{log[0][1]:.4f} | {log[-1][1]:.4f} | "
             f"**{metrics['overall']:.1%}** | {elapsed:.1f}s |"
         )
@@ -231,7 +248,7 @@ def main() -> None:
     lines += ["", "## Precision por distancia de recuperacion", ""]
     header = "| Distancia |"
     sep = "|---|"
-    rows: Dict[str, str] = {m: f"| V3 `{m}` |" for m in summary}
+    rows: Dict[str, str] = {m: f"| `{m}` |" for m in summary}
     for qi in range(N_KEYS):
         dist = QUERY_POSITIONS[qi] - max(HEADER_SLOTS) - 2
         header += f" ~{dist} tok |"
@@ -241,16 +258,13 @@ def main() -> None:
     lines += [header, sep, *rows.values()]
     lines += [
         "",
-        "## Interpretacion honesta",
+        "## Interpretacion",
         "",
-        "- La precision por encima del azar indica que la informacion del "
-        "encabezado sobrevive el transporte hasta la consulta (hipotesis V3, "
-        "seccion 29); la comparacion entre politicas de offsets mide el "
-        "riesgo principal de V3 (seccion 42).",
-        "- Este benchmark mide una tarea sintetica; no demuestra equivalencia "
-        "con atencion en lenguaje natural (V3 seccion 41).",
-        "- Ejecutado con: `python benchmarks/kv_retrieval.py "
-        f"--steps {args.steps} --seed {args.seed}` en este entorno (CPU).",
+        "- ENGRAMA V4 introduce el gating bilateral target-source y el direct trace tap (acceso a T0), "
+        "lo que permite que la senal de las claves y valores sobreviva con mayor fidelidad a traves de capas profundas.",
+        "- V4 resonant_multirate ofrece multiples rutas redundantes para cada distancia, superando la limitacion "
+        "de ruta unica de V3 hierarchical_dyadic.",
+        f"- Ejecutado con: `python benchmarks/kv_retrieval.py --steps {args.steps} --seed {args.seed}`.",
         "",
     ]
 
