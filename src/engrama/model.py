@@ -19,6 +19,7 @@ License: AGPL-3.0
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import torch
@@ -29,6 +30,7 @@ from engrama.config import EngramaConfig
 from engrama.consolidation import ConsolidationStack
 from engrama.encoder import IsolatedEncoder
 from engrama.evoker import MultiCandidateEvoker
+from engrama.losses import linear_cross_entropy
 from engrama.trace import EngramaCache
 
 # Default BOS token id used when ``generate``/``generate_stream`` receive an
@@ -88,19 +90,47 @@ class EngramaModel(nn.Module):
     # ------------------------------------------------------------------
     # Parallel path (training / full-context inference)
     # ------------------------------------------------------------------
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Parallel autoregressive forward pass.
-
-        Args:
-            input_ids: Token tensor of shape ``(B, N)``.
-
-        Returns:
-            Logits tensor of shape ``(B, N, vocab_size)``.
-        """
+    def forward_features(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """Return the final consolidated states before evocation."""
         x = self.embeddings(input_ids)
-        T0 = self.encoder(x)
-        T_L = self.consolidation.forward_train(T0, T0_pristine=T0)
-        return self.evoker(T_L, self.output_embeddings)
+        trace = self.encoder(x)
+        return self.consolidation.forward_train(trace, T0_pristine=trace)
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """Parallel autoregressive forward pass returning vocabulary logits."""
+        return self.evoker(self.forward_features(input_ids), self.output_embeddings)
+
+    def forward_loss(
+        self,
+        input_ids: torch.Tensor,
+        targets: torch.Tensor,
+        *,
+        linear_chunk_size: int = 2048,
+        checkpoint_chunks: bool = True,
+        ignore_index: int = -100,
+    ) -> torch.Tensor:
+        """Compute language-model loss without retaining full vocabulary logits.
+
+        For ``latent_fusion`` (V4) and ``mean`` aggregation this follows the
+        exact same mathematical path as :meth:`forward`; only the execution is
+        reorganised so projection and CE operate on position chunks.  Model
+        architecture, parameters and gradients are unchanged.
+        """
+        if self.evoker.aggregation not in ("latent_fusion", "mean"):
+            raise RuntimeError(
+                "forward_loss requires latent_fusion or mean candidate aggregation"
+            )
+        states = self.forward_features(input_ids)
+        latent = self.evoker.fused_latent(states)
+        return linear_cross_entropy(
+            latent,
+            self.output_embeddings,
+            targets,
+            scale=1.0 / math.sqrt(self.config.d_model),
+            chunk_size=linear_chunk_size,
+            ignore_index=ignore_index,
+            checkpoint_chunks=checkpoint_chunks,
+        )
 
     # ------------------------------------------------------------------
     # Incremental path (cached generation, V3 spec section 13)

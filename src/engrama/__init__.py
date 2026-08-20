@@ -39,8 +39,18 @@ from engrama.encoder import IsolatedEncoder
 from engrama.evoker import MultiCandidateEvoker
 from engrama.inference import Generator
 from engrama.inspection import EngramaInspector
-from engrama.losses import chunked_cross_entropy
+from engrama.losses import chunked_cross_entropy, linear_cross_entropy
 from engrama.model import EngramaModel
+from engrama.optimization import (
+    DistributedContext,
+    LanguageModelLoss,
+    adamw,
+    compile_model,
+    configure_cuda,
+    destroy_distributed,
+    init_distributed,
+    wrap_ddp,
+)
 from engrama.primitives import (
     Cell,
     EngramaLayerNorm,
@@ -61,7 +71,7 @@ from engrama.tokenizer import EngramaTokenizer
 from engrama.trace import CircularTrace, EngramaCache, HierarchicalStateCache
 from engrama.trainer import Trainer
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "Gerson Fabian Buenahora Ormaza (BUEORM)"
 __license__ = "AGPL-3.0"
 
@@ -91,6 +101,15 @@ __all__ = [
     "TextDataset",
     "Trainer",
     "chunked_cross_entropy",
+    "linear_cross_entropy",
+    "DistributedContext",
+    "LanguageModelLoss",
+    "init_distributed",
+    "destroy_distributed",
+    "configure_cuda",
+    "compile_model",
+    "wrap_ddp",
+    "adamw",
     # Inference & tooling
     "Generator",
     "EngramaInspector",

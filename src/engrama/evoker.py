@@ -95,28 +95,37 @@ class MultiCandidateEvoker(nn.Module):
             return base.unsqueeze(-2) + low_rank + self.b_m
         return torch.stack([cand(h_star) for cand in self.candidates], dim=-2)
 
+    def fused_latent(self, h_star: torch.Tensor) -> torch.Tensor:
+        """Aggregate candidates before vocabulary projection.
+
+        This is the exact latent state used by ``latent_fusion`` and ``mean``.
+        Exposing it lets the training path fuse the large vocabulary projection
+        with cross-entropy instead of materialising all logits.
+        """
+        cands = self.candidates_forward(h_star)
+        if self.aggregation == "latent_fusion":
+            fusion_logits = self.gate_fusion(h_star)
+            if fusion_logits.dtype in (torch.float16, torch.bfloat16):
+                weights = F.softmax(fusion_logits.float(), dim=-1).to(cands.dtype)
+            else:
+                weights = F.softmax(fusion_logits, dim=-1)
+            return (cands * weights.unsqueeze(-1)).sum(dim=-2)
+        if self.aggregation == "mean":
+            return cands.mean(dim=-2)
+        raise RuntimeError(
+            "fused_latent is only defined for 'latent_fusion' and 'mean' aggregation"
+        )
+
     def forward(
         self, h_star: torch.Tensor, embedding_weights: torch.Tensor
     ) -> torch.Tensor:
         """Map ``h_*`` to vocabulary logits of shape ``(..., vocab_size)``."""
         scale = 1.0 / math.sqrt(self.d_model)
+
+        if self.aggregation in ("latent_fusion", "mean"):
+            return F.linear(self.fused_latent(h_star), embedding_weights) * scale
+
         cands = self.candidates_forward(h_star)  # (..., M, d)
-
-        if self.aggregation == "latent_fusion":
-            # V4 latent adaptive candidate fusion: aggregate in R^d before vocab projection
-            # Fusion softmax in fp32 under AMP (M is tiny; vocab GEMM stays fp16).
-            fusion_logits = self.gate_fusion(h_star)
-            if fusion_logits.dtype in (torch.float16, torch.bfloat16):
-                w = F.softmax(fusion_logits.float(), dim=-1).to(cands.dtype).unsqueeze(-1)
-            else:
-                w = F.softmax(fusion_logits, dim=-1).unsqueeze(-1)  # (..., M, 1)
-            c_fused = (cands * w).sum(dim=-2)  # (..., d)
-            return F.linear(c_fused, embedding_weights) * scale
-
-        if self.aggregation == "mean":
-            # V3 section 14.2 / 37: arithmetic mean in R^d
-            c_mean = cands.mean(dim=-2)  # (..., d)
-            return F.linear(c_mean, embedding_weights) * scale
 
         flat = cands.reshape(-1, self.num_candidates, self.d_model)  # (P, M, d)
         total = flat.shape[0] * self.num_candidates * self.vocab_size
