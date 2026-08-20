@@ -53,11 +53,11 @@ La traza circular usa `collections.deque(maxlen=N)` — inserción O(1) real
 
 ## 4. Suite de tests
 
-**68 tests, todos en verde** (~14 s, CPU):
+**78 tests, todos en verde** (~14 s, CPU):
 
 ```bash
 cd tests && python -m unittest discover -q
-# Ran 68 tests in 13.5s — OK
+# Ran 78 tests in 13.5s — OK
 ```
 
 Cobertura: config (presets, validación, campos receptivos, horizontes),
@@ -67,7 +67,38 @@ FIFO, horizontes, vistas/device), invarianza causal (matriz 17×2 +
 desborde + estricta), evocador (shapes, LSE estable, M=1,
 optimización `mean`), tokenizador/dataset (round-trip, stride, archivos),
 ecosistema (entrenamiento con schedulers, quickstart end-to-end,
-serialización en todos los modos, benchmarks hooks, generación).
+serialización en todos los modos, benchmarks hooks, generación),
+caminos memory-safe (CE por trozos equivalente a `F.cross_entropy`,
+evocador chunked + checkpointing equivalente al path plano, gradientes,
+invarianza causal bajo el path chunked, Trainer con vocabulario grande).
+
+## 4bis. Caminos memory-safe para vocabularios grandes (2026-08-20)
+
+Motivación: con el tokenizer GPT-2 (50,257 tokens) el evocador
+`logsumexp`/`max` materializaba logits `(B, N, M, V)` en fp32 — con
+batch 16 × 512 × 4 candidatos son ~6.6 GB por GPU, más los temporales
+del softmax, y se agotaba la memoria de una T4 de 16 GB (el modelo solo
+tiene ~20M parámetros; el problema nunca fue el modelo, sino esos
+tensores intermedios).
+
+Verificado (medido, CPU, config del notebook `kaggle/engrama_v3_20m_*`,
+vocab 50,257, seq 512, 4 candidatos):
+
+| Path | Batch | VmHWM (GiB) |
+|---|---|---|
+| Plain (antiguo) | 2 | 3.10 |
+| Chunked + checkpointing (nuevo) | 4 | **1.92** |
+
+- El path chunked produce los **mismos logits** que el plain (max |diff| ≤ 1e-5,
+  `test_logsumexp_plain_vs_chunked`, `test_max_plain_vs_chunked`) y los
+  gradientes coinciden ≤ 1e-4 (`test_chunked_path_backward_and_gradients_match`);
+  la invarianza causal se mantiene bajo el path chunked
+  (`test_causal_invariance_holds_under_chunked_path`).
+- `engrama.chunked_cross_entropy` es equivalente a `F.cross_entropy`
+  (valores ≤ 1e-5 con/sin `ignore_index`, reducciones `mean/sum/none`,
+  gradientes ≤ 1e-5) y evita la segunda copia de logits del
+  `log_softmax`; `Trainer` la activa automáticamente con vocabularios
+  > 16k (`test_trainer_switches_to_chunked_loss`).
 
 ## 5. Benchmark de largo alcance
 

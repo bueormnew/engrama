@@ -4,6 +4,47 @@ Todos los cambios notables de ENGRAMA se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 versionado semántico (semver).
 
+## [No publicado] — 2026-08-20
+
+### Corregido (memoria y notebooks Kaggle)
+
+- `evoker.py`: la agregación `logsumexp`/`max` con vocabularios grandes
+  materializaba logits `(B, N, M, V)` completos en fp32 (con GPT-2 a batch
+  16×512×4 candidatos ≈ 6.6 GB por GPU, +20 GB con los temporales del
+  softmax → CUDA OOM en T4 de 16 GB). Ahora el vocabulario se procesa por
+  trozos con gradient checkpointing: pico medido 1.92 GiB (batch 4, seq
+  512, vocab 50,257) frente a 3.10 GiB del path antiguo a la mitad de
+  batch; resultados matemáticamente idénticos (verificado ≤1e-5).
+- Nueva `engrama.losses.chunked_cross_entropy`: misma cross-entropy que
+  `F.cross_entropy` (valores, `ignore_index`, reducciones y gradientes
+  verificados ≤1e-5) sin materializar la segunda copia de logits del
+  `log_softmax`. `Trainer` la usa automáticamente con vocabularios > 16k.
+- `kaggle/engrama_v3_20m_tinystories_gpt2.ipynb` reescrito:
+  - `FAST_MODE = False` por defecto (antes `True` construía en silencio un
+    modelo de 7.9M en lugar del anunciado de ~20.3M); el notebook ahora
+    aborta si el modelo no tiene los ~20M esperados o si el tokenizer
+    GPT-2 no carga en modo FULL.
+  - Descarga robusta de TinyStories: reintentos con backoff, reanudación
+    con `Range`, verificación de tamaño exacto (train 2,227,753,162 B;
+    valid 22,502,601 B) y sin fallbacks silenciosos: si el dataset no
+    puede obtenerse completo, el notebook aborta con instrucciones.
+  - Tokenización en streaming a `np.memmap` (antes acumulaba ~190M ids en
+    listas de Python, ~5 GB de RAM); el dataset son vistas sobre el
+    memmap, sin copias.
+  - Entrenamiento con pérdida por GPU (DataParallel solo reúne escalares)
+    y evaluación con CE por trozos; `RESUME=True` reanuda desde el último
+    paso con el mismo orden de datos.
+- `kaggle/engrama_v3_tinystories.ipynb`: corregidas las celdas rotas
+  (variables `size`/`n_epochs` sin definir, `text` podía quedar `None`
+  offline) y descarga con verificación de tamaño.
+
+### Tests
+
+- Suite ampliada de 68 a **78 tests** (nuevos `test_memory_safe_paths.py`:
+  equivalencia CE por trozos, path chunked vs plain del evocador,
+  gradientes, invarianza causal bajo el path chunked, Trainer con
+  vocabulario grande).
+
 ## [0.3.0] - 2026-08-20
 
 ### Arquitectura V3 (núcleo)

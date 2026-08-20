@@ -5,7 +5,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](#instalación)
 [![PyTorch ≥ 2.0](https://img.shields.io/badge/PyTorch-%E2%89%A52.0-ee4c2c.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-68%20passing-brightgreen)](docs/VERIFICACION.md)
+[![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)](docs/VERIFICACION.md)
 [![CI](https://github.com/bueormnew/engrama/actions/workflows/ci.yml/badge.svg)](https://github.com/bueormnew/engrama/actions/workflows/ci.yml)
 [![Sin atención](https://img.shields.io/badge/attention-zero-important)](#qué-es-engrama-v3)
 
@@ -248,6 +248,7 @@ Contratos estables de la librería (útiles para integrar ENGRAMA en pipelines p
 | `Generator.generate(prompt, ...)` | `str` | `str` (prompt + completado, especiales omitidos) |
 | `TextDataset[índice]` | — | `{"input_ids": (S,), "target_ids": (S,)}` |
 | `Trainer.fit(dataset, batch_size, epochs)` | `Dataset` con pares input/target | `List[float]` pérdida por época |
+| `chunked_cross_entropy(logits, targets)` | `(..., V)` / `(...)` | CE por trozos de vocabulario (memoria O(N·chunk), equivalente a `F.cross_entropy`) |
 
 Detalles de contrato:
 
@@ -278,13 +279,13 @@ engrama benchmark --size small --seq-len 256 --runs 10
 
 Todo número de este repositorio proviene de ejecuciones reales (política de honestidad §56 de la especificación). Detalle completo en [`docs/VERIFICACION.md`](docs/VERIFICACION.md):
 
-- **68 tests** (`python -m unittest discover` dentro de `tests/`, ~14 s en CPU): presets de versión, validación de config, primitivas (sinapsis factorizadas, compuerta desde la fuente, transporte identidad exacto), encoder/traza, matriz de invarianza causal de 17 modos × 2 cachés, evocador, tokenizador/dataset y ecosistema de entrenamiento.
+- **78 tests** (`python -m unittest discover` dentro de `tests/`, ~14 s en CPU): presets de versión, validación de config, primitivas (sinapsis factorizadas, compuerta desde la fuente, transporte identidad exacto), encoder/traza, matriz de invarianza causal de 17 modos × 2 cachés, evocador, tokenizador/dataset y ecosistema de entrenamiento.
 - **Invarianza causal**: error máximo 5.96e-07 (float32) entre forward paralelo e incremental, incluido el régimen de desborde FIFO cuando el cono de dependencias cabe en la ventana retenida.
 - **Transporte identidad (§31)**: con $s = 0, \beta = 1$ la sinapsis transporta el vector *exactamente* (error 0.0).
 - **Benchmark de recuperación clave–valor de largo alcance**: ver [`benchmarks/KV_RETRIEVAL_REPORT.md`](benchmarks/KV_RETRIEVAL_REPORT.md) (script: `benchmarks/kv_retrieval.py`). Tarea sintética con bindings aleatorios por muestra (imposible memorizar); compara `hierarchical_dyadic` vs `dense_dilated` a distancias de hasta ~176 tokens. Los resultados son honestos: confirman el riesgo principal señalado por la propia especificación (§42) y motivan la ablación con ancla global.
 
 ```bash
-cd tests && python -m unittest discover -q   # 68 tests
+cd tests && python -m unittest discover -q   # 78 tests
 python benchmarks/kv_retrieval.py --steps 600 --seed 1234 --force
 ```
 
@@ -313,11 +314,12 @@ engrama/
 │   ├── benchmarks.py       # BenchmarkSuite de latencia/estado de caché
 │   ├── quick.py            # modo rápido: quickstart / create_model / QuickRun
 │   └── cli.py              # CLI `engrama`
-├── tests/                  # 68 tests (unittest)
+├── tests/                  # 78 tests (unittest)
 ├── benchmarks/             # benchmark KV de largo alcance + reporte real
 ├── examples/               # ejemplos ejecutables (01, 02, 03)
 ├── docs/                   # guía completa + verificación
-├── kaggle/                 # notebooks TinyStories (char y ~20M con GPT-2, GPU recomendada)
+├── kaggle/                 # notebooks TinyStories (char y ~20M con GPT-2, GPU recomendada;
+│                           #  descarga verificada, tokenización streaming, CE por trozos)
 ├── .github/workflows/      # CI (Python 3.9–3.12, torch CPU)
 ├── ENGRAMA-V3-Teorica.md   # especificación V3 implementada
 ├── ENGRAMA-Paper-Final-Verificado.md  # paper V1+V2 (referencia)
@@ -357,7 +359,7 @@ Ideas priorizadas (contribuciones bienvenidas, ver [CONTRIBUTING.md](CONTRIBUTIN
 
 Lee [`CONTRIBUTING.md`](CONTRIBUTING.md) antes de abrir un issue o PR. En resumen:
 
-- Los 68 tests deben quedar en verde (`cd tests && python -m unittest discover -q`).
+- Los 78 tests deben quedar en verde (`cd tests && python -m unittest discover -q`).
 - Todo número publicado debe venir de una **ejecución real** (política de honestidad §56).
 - El código debe seguir siendo PyTorch puro, sin atención y sin dependencias nuevas.
 
