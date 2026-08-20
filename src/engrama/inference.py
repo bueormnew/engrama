@@ -1,8 +1,12 @@
-"""
-ENGRAMA Text Generation Engine Module
+"""ENGRAMA Text Generation Engine Module.
+
+High-level text generation wrapper binding a model with its tokenizer.
+
 Author: BUEORM
 License: AGPL-3.0
 """
+
+from __future__ import annotations
 
 from typing import Generator as PyGenerator, Optional
 
@@ -11,11 +15,11 @@ from engrama.tokenizer import EngramaTokenizer
 
 
 class Generator:
-    """High-level text generation interface wrapper for ENGRAMA models.
+    """High-level text generation interface for ENGRAMA models.
 
     Args:
-        model (EngramaModel): Loaded ENGRAMA model instance.
-        tokenizer (EngramaTokenizer): Tokenizer instance.
+        model: ENGRAMA model instance.
+        tokenizer: Matching tokenizer instance.
     """
 
     def __init__(self, model: EngramaModel, tokenizer: EngramaTokenizer):
@@ -31,8 +35,9 @@ class Generator:
         top_p: Optional[float] = None,
         repetition_penalty: float = 1.0,
         use_cache: bool = True,
+        stop_at_eos: bool = False,
     ) -> str:
-        """Generate text completion for a given prompt string."""
+        """Generate a text completion for ``prompt`` (prompt included)."""
         prompt_ids = self.tokenizer.encode(prompt, add_bos=True, add_eos=False)
         output_ids = self.model.generate(
             prompt_ids=prompt_ids,
@@ -42,6 +47,7 @@ class Generator:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             use_cache=use_cache,
+            eos_token_id=self.tokenizer.SPECIAL_TOKENS["<eos>"] if stop_at_eos else None,
         )
         return self.tokenizer.decode(output_ids, skip_special_tokens=True)
 
@@ -53,8 +59,9 @@ class Generator:
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         repetition_penalty: float = 1.0,
+        stop_at_eos: bool = False,
     ) -> PyGenerator[str, None, None]:
-        """Stream generated characters/tokens completion one by one."""
+        """Stream the completion token by token (character-level models: per char)."""
         prompt_ids = self.tokenizer.encode(prompt, add_bos=True, add_eos=False)
         for token_id in self.model.generate_stream(
             prompt_ids=prompt_ids,
@@ -63,6 +70,6 @@ class Generator:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            eos_token_id=self.tokenizer.SPECIAL_TOKENS["<eos>"] if stop_at_eos else None,
         ):
-            char_str = self.tokenizer.decode([token_id], skip_special_tokens=True)
-            yield char_str
+            yield self.tokenizer.decode([token_id], skip_special_tokens=True)
