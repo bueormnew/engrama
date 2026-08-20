@@ -33,6 +33,10 @@ def _activation(name: str) -> nn.Module:
     raise ValueError(f"Unsupported activation: {name!r}")
 
 
+def _cast_norm_weight(weight: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return weight if weight.dtype == dtype else weight.to(dtype)
+
+
 def _norm(name: str, d_model: int) -> nn.Module:
     n = name.lower()
     if n == "rmsnorm":
@@ -53,9 +57,14 @@ class EngramaLayerNorm(nn.Module):
         self.beta = nn.Parameter(torch.zeros(d_model))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mean = x.mean(dim=-1, keepdim=True)
-        var = x.var(dim=-1, keepdim=True, unbiased=False)
-        return (x - mean) / torch.sqrt(var + self.eps) * self.gamma + self.beta
+        # Stats in fp32 under AMP: fp16 mean/var underflow and poison the residual.
+        out_dtype = x.dtype
+        x32 = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
+        mean = x32.mean(dim=-1, keepdim=True)
+        var = x32.var(dim=-1, keepdim=True, unbiased=False)
+        y = (x32 - mean) / torch.sqrt(var + self.eps)
+        y = y * _cast_norm_weight(self.gamma, y.dtype) + _cast_norm_weight(self.beta, y.dtype)
+        return y.to(out_dtype)
 
 
 class EngramaRMSNorm(nn.Module):
@@ -68,8 +77,13 @@ class EngramaRMSNorm(nn.Module):
         self.gamma = nn.Parameter(torch.ones(d_model))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
-        return x * rms * self.gamma
+        # RMS in fp32 under AMP (same recipe as Llama): cheap, keeps Tensor-Core
+        # matmuls in fp16 and prevents rsqrt(0)/overflow after dual-gating mix.
+        out_dtype = x.dtype
+        x32 = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
+        rms = torch.rsqrt(x32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        y = x32 * rms * _cast_norm_weight(self.gamma, x32.dtype)
+        return y.to(out_dtype)
 
 
 class Cell(nn.Module):

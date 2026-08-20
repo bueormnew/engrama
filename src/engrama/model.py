@@ -182,6 +182,9 @@ class EngramaModel(nn.Module):
             logits[indices_to_remove] = -float("inf")
 
         probs = F.softmax(logits, dim=-1)
+        if not torch.isfinite(probs).all() or (probs < 0).any() or probs.sum() <= 0:
+            finite = torch.nan_to_num(logits, nan=-1e4, posinf=1e4, neginf=-1e4)
+            return int(torch.argmax(finite, dim=-1).item())
         return int(torch.multinomial(probs, num_samples=1).item())
 
     # ------------------------------------------------------------------

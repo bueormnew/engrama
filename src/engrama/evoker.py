@@ -104,7 +104,12 @@ class MultiCandidateEvoker(nn.Module):
 
         if self.aggregation == "latent_fusion":
             # V4 latent adaptive candidate fusion: aggregate in R^d before vocab projection
-            w = F.softmax(self.gate_fusion(h_star), dim=-1).unsqueeze(-1)  # (..., M, 1)
+            # Fusion softmax in fp32 under AMP (M is tiny; vocab GEMM stays fp16).
+            fusion_logits = self.gate_fusion(h_star)
+            if fusion_logits.dtype in (torch.float16, torch.bfloat16):
+                w = F.softmax(fusion_logits.float(), dim=-1).to(cands.dtype).unsqueeze(-1)
+            else:
+                w = F.softmax(fusion_logits, dim=-1).unsqueeze(-1)  # (..., M, 1)
             c_fused = (cands * w).sum(dim=-2)  # (..., d)
             return F.linear(c_fused, embedding_weights) * scale
 
