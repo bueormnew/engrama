@@ -39,6 +39,7 @@ from engrama.encoder import IsolatedEncoder
 from engrama.evoker import MultiCandidateEvoker
 from engrama.inference import Generator
 from engrama.inspection import EngramaInspector
+from engrama.losses import chunked_cross_entropy
 from engrama.model import EngramaModel
 from engrama.primitives import (
     Cell,
@@ -87,6 +88,7 @@ __all__ = [
     "EngramaTokenizer",
     "TextDataset",
     "Trainer",
+    "chunked_cross_entropy",
     # Inference & tooling
     "Generator",
     "EngramaInspector",

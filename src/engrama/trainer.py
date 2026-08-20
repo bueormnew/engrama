@@ -17,7 +17,20 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
+from engrama.losses import chunked_cross_entropy
 from engrama.model import EngramaModel
+
+# Above this vocabulary size the Trainer switches to the chunked
+# cross-entropy (see ``engrama.losses``) so large-vocab training does not
+# materialize a second full logits copy for ``log_softmax``.
+_LARGE_VOCAB_THRESHOLD = 16384
+
+
+def _cross_entropy(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """Cross-entropy, memory-friendly for large vocabularies."""
+    if logits.size(-1) > _LARGE_VOCAB_THRESHOLD:
+        return chunked_cross_entropy(logits, targets)
+    return F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
 
 class Trainer:
@@ -104,9 +117,7 @@ class Trainer:
             input_ids, target_ids = self._unpack_batch(batch)
             self.optimizer.zero_grad()
             logits = self.model(input_ids)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), target_ids.view(-1)
-            )
+            loss = _cross_entropy(logits, target_ids)
             loss.backward()
             if self.gradient_clip and self.gradient_clip > 0:
                 torch.nn.utils.clip_grad_norm_(
@@ -161,9 +172,7 @@ class Trainer:
                 for batch in dataloader:
                     input_ids, target_ids = self._unpack_batch(batch)
                     logits = self.model(input_ids)
-                    loss = F.cross_entropy(
-                        logits.view(-1, logits.size(-1)), target_ids.view(-1)
-                    )
+                    loss = _cross_entropy(logits, target_ids)
                     total_loss += loss.item()
                     num_batches += 1
         finally:
