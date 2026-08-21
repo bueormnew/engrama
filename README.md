@@ -18,6 +18,46 @@ Esta versión introduce **ENGRAMA V4**, diseñada para resolver de forma simult�
 
 ---
 
+## 🆕 ENGRAMA V5 — Resonancia Sináptica (recomendado)
+
+> **V5 resuelve el cuello de botella de recuperación de V4**: donde V4 quedaba en
+> ~azar (8.6%) en recuperación clave→valor a distancia variable, **V5 alcanza
+> 95–98%** con **menos parámetros**, manteniendo cero atención y cero compresión.
+> Ver `ENGRAMA-V5-Teorica.md`, `docs/DIAGNOSTICO_V4.md` y `docs/V5_RESULTADOS.md`.
+
+La idea central: en vez de una convolución sobre offsets fijos, V5 lee la **Traza
+explícita** (cada token guardado como el token exacto que es) mediante
+**resonancia sináptica** — una compuerta sigmoide **punto a punto**
+`σ(τ·⟨q,k⟩ + b)` que decide cada conexión de forma independiente. **No hay softmax
+sobre posiciones** (no es atención), **no hay estado comprimido** (no es un modelo
+de estado tipo Mamba). Por eso el recuerdo no se diluye al crecer el contexto.
+
+```python
+import torch
+from engrama import EngramaV5, EngramaV5Config
+
+cfg = EngramaV5Config(vocab_size=32000, d_model=256, num_layers=6,
+                      num_heads=8, context_length=8192)
+model = EngramaV5(cfg)
+
+logits = model(torch.randint(0, 32000, (2, 128)))       # (2, 128, 32000)
+out = model.generate([1, 2, 3], max_new_tokens=50)      # caché nativa O(N)
+```
+
+| Métrica (medida en CPU) | V4 | V5 |
+|---|---:|---:|
+| Recall KV (azar 6.2%) | 8.6% | **95–98%** |
+| Parámetros (misma tarea) | 438–475K | **243K** |
+| Atención | no | no |
+| Compresión | caché de horizonte | **ninguna (traza O(N))** |
+| Memoria de generación | comprimida | **O(N) exacta (bytes/token constante)** |
+| Invarianza causal | ✅ | ✅ (\|Δ\| < 1e-4) |
+| Sin NaN (fp16/fp32) | ✅ | ✅ |
+
+Guía completa: [`docs/V5_GUIA.md`](docs/V5_GUIA.md).
+
+---
+
 ## 📑 Tabla de Contenidos
 
 - [🧠 Filosofía y las 4 Fases de ENGRAMA](#-filosofía-y-las-4-fases-de-engrama)

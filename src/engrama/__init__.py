@@ -71,6 +71,15 @@ from engrama.tokenizer import EngramaTokenizer
 from engrama.trace import CircularTrace, EngramaCache, HierarchicalStateCache
 from engrama.trainer import Trainer
 
+# ENGRAMA V5 — synaptic resonance over an explicit trace (recommended).
+from engrama.v5 import (
+    EngramaV5,
+    EngramaV5Config,
+    ResonanceCache,
+    SynapticResonance,
+    V5Trainer,
+)
+
 __version__ = "0.5.0"
 __author__ = "Gerson Fabian Buenahora Ormaza (BUEORM)"
 __license__ = "AGPL-3.0"
@@ -79,7 +88,13 @@ __all__ = [
     "__version__",
     "__author__",
     "__license__",
-    # Core architecture
+    # ENGRAMA V5 (recommended: synaptic resonance, no attention, no compression)
+    "EngramaV5",
+    "EngramaV5Config",
+    "SynapticResonance",
+    "ResonanceCache",
+    "V5Trainer",
+    # Core architecture (V1-V4 legacy)
     "EngramaConfig",
     "EngramaModel",
     "EngramaCache",

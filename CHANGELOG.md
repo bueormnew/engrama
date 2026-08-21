@@ -6,6 +6,32 @@ versionado semántico (semver).
 
 ## [No publicado] — 2026-08-21
 
+### Añadido — ENGRAMA V5 (Resonancia Sináptica, sin atención, sin compresión)
+
+- **Nuevo paquete `engrama.v5`** con API profesional estilo PyTorch/Keras:
+  `EngramaV5`, `EngramaV5Config`, `SynapticResonance`, `ResonanceCache`,
+  `V5Trainer`. Exportados también desde el nivel superior `engrama`.
+- **Núcleo de resonancia sináptica** (`src/engrama/v5/resonance.py`): lectura
+  de la traza explícita mediante compuerta sigmoide punto a punto
+  `σ(τ·⟨q,k⟩+b)` — **sin softmax sobre posiciones** (no es atención) y **sin
+  estado comprimido** (no es un modelo de estado). Tres rutas equivalentes:
+  forward paralelo, forward por chunks (contextos enormes) y step incremental.
+- **Caché nativa de generación** (`ResonanceCache`): traza explícita de pares
+  (k, v), memoria **O(N) exacta** (bytes/token constante), sin recomputar
+  tokens previos.
+- **Diagnóstico de V4** (`docs/DIAGNOSTICO_V4.md`): reproduce y explica por qué
+  la recuperación de V4 era ~azar (convolución de offsets fijos sin
+  direccionamiento por contenido) y por qué "source_gate" parecía ganar.
+- **Teoría V5** (`ENGRAMA-V5-Teorica.md`), **guía** (`docs/V5_GUIA.md`) y
+  **resultados medidos** (`docs/V5_RESULTADOS.md`).
+- **Tests** (`tests/test_v5.py`, 16 casos): invarianza causal, chunked ≡ full,
+  causalidad estricta, sin NaN (fp16/fp32), memoria lineal, ausencia de softmax.
+- **Benchmark** (`benchmarks/kv_retrieval_v5.py`), **ejemplo**
+  (`examples/v5_quickstart.py`) y **notebook Kaggle** para validación real a
+  8192 tokens en GPU (`kaggle/engrama_v5_long_context_recall.ipynb`).
+- **Resultados**: recuperación clave→valor de **~8.6% (V4) a 95–98% (V5)** con
+  **menos parámetros** (243K vs 438–475K), verificado en CPU a SEQ 128/256.
+
 ### Corregido (notebook 4 modelos se colgaba tras el primero)
 
 - `kaggle/train_compare_ddp.py`: al terminar un `torchrun` el rank 0 llamaba

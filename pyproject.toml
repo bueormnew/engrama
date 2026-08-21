@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "engrama"
 version = "0.5.0"
-description = "ENGRAMA V3: Non-Attention Autoregressive Neural Architecture — isolated encoding, circular trace, hierarchical dyadic consolidation with factorized synapses, and multi-candidate evocation. Pure PyTorch."
+description = "ENGRAMA V5: Non-Attention Autoregressive Neural Architecture — isolated encoding, explicit circular trace, and content-addressable synaptic-resonance recall (no attention, no compression). Pure PyTorch."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
