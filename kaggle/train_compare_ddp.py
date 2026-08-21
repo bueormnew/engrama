@@ -160,10 +160,15 @@ class TransformerLM(nn.Module):
         )
         self.ln_f = RMSNorm(d_model)
         self.drop = nn.Dropout(dropout)
-        self._rope_len = 0
-        self._rope_key = None
-        self._cos = None
-        self._sin = None
+        # RoPE tables registered as buffers: created once at init so every
+        # forward reads stable tensors.  (Caching them as plain attributes
+        # created inside ``forward`` breaks CUDA-graph replays under
+        # ``torch.compile(mode="reduce-overhead")``: the cached cos/sin get
+        # allocated inside a graph pool and silently die or crash when the
+        # eval batch shape triggers a second recording.)
+        cos, sin = _rope_cache(self.head_dim, max_seq_len, "cpu", torch.float32)
+        self.register_buffer("rope_cos", cos, persistent=False)
+        self.register_buffer("rope_sin", sin, persistent=False)
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -183,13 +188,11 @@ class TransformerLM(nn.Module):
         if t > self.max_seq_len:
             raise ValueError(f"sequence length {t} exceeds max_seq_len={self.max_seq_len}")
         x = self.drop(self.tok_emb(input_ids))
-        key = (t, x.device, x.dtype)
-        if self._rope_key != key:
-            self._cos, self._sin = _rope_cache(self.head_dim, t, x.device, x.dtype)
-            self._rope_len = t
-            self._rope_key = key
+        # Slices of persistent buffers: no dynamic allocation, no staleness.
+        cos = self.rope_cos[:t].to(x.dtype)
+        sin = self.rope_sin[:t].to(x.dtype)
         for block in self.blocks:
-            x = block(x, self._cos, self._sin)
+            x = block(x, cos, sin)
         return self.ln_f(x)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -395,8 +398,16 @@ def reduce_mean(value: torch.Tensor, world_size: int) -> torch.Tensor:
 
 
 @torch.inference_mode()
-def evaluate(model, loader, device, amp, max_batches, world_size):
-    model.eval()
+def evaluate(raw_model, loader, device, amp, max_batches, world_size):
+    """Eval on the *raw* model (never the DDP/compiled wrapper).
+
+    The compiled ``reduce-overhead`` module owns CUDA graphs recorded for the
+    training batch shape; interleaving eval batches through it both re-records
+    graphs (slow) and risks cudagraph-pool errors that killed the transformer
+    baseline mid-run.  ``raw_model`` shares the exact same parameters, so this
+    evaluates the identical function eagerly and safely.
+    """
+    raw_model.eval()
     total = torch.zeros((), device=device)
     count = torch.zeros((), device=device)
     for i, (x, y) in enumerate(loader):
@@ -405,15 +416,17 @@ def evaluate(model, loader, device, amp, max_batches, world_size):
         x = x.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
         with torch.autocast("cuda", dtype=torch.float16, enabled=amp):
-            loss = model(x, y)
-        if not torch.isfinite(loss):
-            continue
-        total += loss.detach()
-        count += 1
+            loss = raw_model.forward_loss(
+                x, y, linear_chunk_size=8192, checkpoint_chunks=False
+            )
+        loss = float(loss.item())  # read immediately: no stale graph outputs
+        if math.isfinite(loss):
+            total += loss
+            count += 1
     if world_size > 1:
         dist.all_reduce(total)
         dist.all_reduce(count)
-    model.train()
+    raw_model.train()
     return (total / count.clamp_min(1)).item()
 
 
@@ -661,8 +674,11 @@ def main():
                     )
 
             if step % args.eval_every == 0 or step == total_steps:
+                if mark_cudagraph and compiled:
+                    # Fresh cudagraph step boundary before switching shapes.
+                    torch.compiler.cudagraph_mark_step_begin()
                 last_val = evaluate(
-                    train_model,
+                    raw_model,
                     valid_loader,
                     device,
                     amp,
@@ -710,7 +726,8 @@ def main():
         # Reuse the in-loop eval at total_steps so rank 0 does not wait alone.
         if not math.isfinite(last_val):
             last_val = evaluate(
-                train_model, valid_loader, device, amp, args.eval_batches, ctx.world_size
+                raw_model, valid_loader, device, amp,
+                args.eval_batches, ctx.world_size,
             )
         val = last_val
         if ctx.is_main:

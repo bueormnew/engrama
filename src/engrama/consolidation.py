@@ -47,6 +47,20 @@ def _sigmoid(x: torch.Tensor) -> torch.Tensor:
     return torch.sigmoid(x)
 
 
+def _clamp_bilinear(bilinear: torch.Tensor, clamp: Optional[float]) -> torch.Tensor:
+    """Bounded bilinear gate term: ``C * tanh(b/C)``.
+
+    The raw term ``<q_tgt, k_src>/sqrt(d_g)`` grows with the squared magnitude
+    of the residual stream, which itself grows ~10x during training; past
+    ~8-10 the sigmoid saturates and the gate stops being modulable (measured:
+    deep dual gates collapse to 0/1 in >90% of channels).  ``None`` keeps the
+    classic V4 behaviour; ``clamp=4.0`` is the recommended bounded variant.
+    """
+    if clamp is None or clamp <= 0:
+        return bilinear
+    return clamp * torch.tanh(bilinear.float() / clamp).to(bilinear.dtype)
+
+
 class PositionalDilatedMix(nn.Module):
     """Positional dilated mix with factorized fidelity transport and dual gating."""
 
@@ -62,6 +76,7 @@ class PositionalDilatedMix(nn.Module):
         stable_init: bool = True,
         gating_mode: str = "dual",
         trace_tap: bool = True,
+        dual_bilinear_clamp: Optional[float] = None,
     ):
         super().__init__()
         if synapse_mode not in ("dense", "factorized"):
@@ -83,6 +98,7 @@ class PositionalDilatedMix(nn.Module):
         self.hierarchical_gate = hierarchical_gate
         self.gating_mode = gating_mode
         self.trace_tap = trace_tap
+        self.dual_bilinear_clamp = dual_bilinear_clamp
         self.max_offset = max(self.offsets)
 
         # Source gating projection (shared per source state)
@@ -209,7 +225,8 @@ class PositionalDilatedMix(nn.Module):
             gate_w_tgt = torch.stack([self.gate_w_tgt[k] for k in keys])
             g_tgt = torch.einsum("bnq,pqd->bnpd", q_tgt, gate_w_tgt)
             bilinear = (q_tgt.unsqueeze(2) * k_src).sum(dim=-1, keepdim=True)
-            gates = _sigmoid(g_src + g_tgt + bilinear * scale_dg + gate_b)
+            bilinear = _clamp_bilinear(bilinear * scale_dg, self.dual_bilinear_clamp)
+            gates = _sigmoid(g_src + g_tgt + bilinear + gate_b)
         else:
             gates = _sigmoid(g_src + gate_b)
 
@@ -269,6 +286,7 @@ class PositionalDilatedMix(nn.Module):
 
             if self.gating_mode == "dual" and q_tgt is not None and self.gate_w_tgt is not None:
                 bilinear = (q_tgt * k_src).sum(dim=-1, keepdim=True) * scale_dg
+                bilinear = _clamp_bilinear(bilinear, self.dual_bilinear_clamp)
                 g_tgt = q_tgt @ self.gate_w_tgt[str_p]
                 g_src = k_src @ self.gate_w_src[str_p]
                 g = _sigmoid(bilinear + g_tgt + g_src + self.gate_b[str_p])
@@ -338,6 +356,7 @@ class ConsolidationLayer(nn.Module):
             stable_init=config.stable_init,
             gating_mode=config.gating_mode or "source",
             trace_tap=bool(config.trace_tap),
+            dual_bilinear_clamp=config.dual_bilinear_clamp,
         )
         self.cell = Cell(
             config.d_model,

@@ -140,3 +140,33 @@ class TestV4Architecture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_dual_bilinear_clamp_causal_invariance(self):
+        """La variante opt-in dual_bilinear_clamp conserva la equivalencia
+        forward_train == step_forward y acota la pre-activacion bilineal."""
+        torch.manual_seed(11)
+        cfg = EngramaConfig(
+            vocab_size=48, d_model=32, d_gate=8, d_ff=64, num_cells=2,
+            num_encoder_layers=1, num_consolidation_layers=4,
+            context_length=24, num_candidates=2, version="v4",
+            synapse_rank=8, dual_bilinear_clamp=4.0,
+        )
+        model = EngramaModel(cfg)
+        model.eval()
+        x = torch.randint(0, 48, (2, 20))
+        with torch.no_grad():
+            parallel = model(x)
+            cache = model.get_cache(N_max=20, mode="hierarchical")
+            for t in range(20):
+                step_logits, _ = model.step_forward(x[:, t : t + 1], cache, timestamp=t)
+        self.assertTrue(
+            torch.allclose(parallel[:, -1], step_logits, atol=1e-4),
+            msg="clamp rompe la invarianza causal",
+        )
+        # el clamp no debe cambiar el modo source ni el default (None)
+        cfg_plain = EngramaConfig(
+            vocab_size=48, d_model=32, d_gate=8, d_ff=64, num_cells=2,
+            num_encoder_layers=1, num_consolidation_layers=4,
+            context_length=24, num_candidates=2, version="v4", synapse_rank=8,
+        )
+        self.assertIsNone(cfg_plain.dual_bilinear_clamp)

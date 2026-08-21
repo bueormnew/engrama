@@ -75,7 +75,16 @@ __version__ = "0.5.0"
 __author__ = "Gerson Fabian Buenahora Ormaza (BUEORM)"
 __license__ = "AGPL-3.0"
 
+try:  # V5: arquitectura sin atencion con recuperacion exacta (ver docs/ENGRAMA-V5-Teorica.md)
+    from engrama.v5 import EngraModel as EngraModelV5, V5Config, RecallTap, V5Trace
+except Exception:  # pragma: no cover
+    pass
+
 __all__ = [
+    "EngraModelV5",
+    "V5Config",
+    "RecallTap",
+    "V5Trace",
     "__version__",
     "__author__",
     "__license__",

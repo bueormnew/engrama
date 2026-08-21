@@ -3,12 +3,17 @@
 
 **ENGRAMA** es una arquitectura neuronal autorregresiva de memoria explícita **sin atención** — cero $QK^\top$, cero matrices de afinidad $N \times N$, cero decaimiento exponencial artificial, cero softmax sobre la dimensión temporal — implementada en **PyTorch puro**. 
 
+> **Novedad — ENGRAMA V5 (1.0 + V5.1)**: sin atención, sin compresión y con
+> **recuperación exacta a cualquier distancia** (100 % denso / 96 % con entrenamiento
+> lineal LSH a 16384 tokens, entrenando solo a 2048). Ver la sección
+> [ENGRAMA V5](#-engrama-v5--sin-atención-sin-compresión-recuperación-exacta) más abajo.
+
 Esta versión introduce **ENGRAMA V4**, diseñada para resolver de forma simultánea el rendimiento computacional en entrenamiento (aceleración de más de **$15\times$**, reduciendo de 30+ horas a **~1.8 horas** en Kaggle para 500M de tokens) y la precisión de recuperación en contextos cortos, medios, largos y extremos mediante **gating bilateral target-source**, **acceso directo a la traza prístina ($T_0$ Trace Tap)**, **jerarquía de offsets resonantes multiescala** y **evocador de fusión latente**.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](#-instalación)
 [![PyTorch ≥ 2.0](https://img.shields.io/badge/PyTorch-%E2%89%A52.0-ee4c2c.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](docs/VERIFICACION.md)
+[![Tests](https://img.shields.io/badge/tests-118%20passing-brightgreen)](docs/VERIFICACION.md)
 [![Sin atención](https://img.shields.io/badge/attention-zero-important)](#-filosofía-y-las-4-fases-de-engrama)
 
 - **Autor**: Gerson Fabian Buenahora Ormaza (BUEORM)
@@ -128,9 +133,169 @@ La mayoría de modelos de lenguaje modernos utilizan mecanismos de atención ($Q
 | **Normalización en Célula** | LayerNorm | LayerNorm | LayerNorm | **RMSNorm (Preserva signos)** |
 | **Evocador Multicandidato** | Denso $M d^2$ | Denso $M d^2$ | Factorizado ($logsumexp/mean$) | **Latent Fusion ($O(\|V\|d)$ sin checkpoints)** |
 | **Tiempo de Entrenamiento (500M tok)** | >60 horas | >40 horas | >30.8 horas | **~1.8 a 2.3 horas en GPU T4** |
-| **Recuperación KV Exacta** | Baja | Media (27.5%) | Baja (7.4% diádico) | **Alta (>75% con Trace Tap + Dual)** |
+| **Recuperación KV Exacta** | Baja | Media (27.5%) | Baja (7.4% diádico) | **Sin ventaja medida todavía** (ver nota) |
 
 ---
+
+> **Nota honesta sobre la recuperación KV (2026-08):** la cifra ">75%" que aparecía aquí
+> era una proyección sin medición que la respaldara. Los números reales del repo son los
+> del `benchmarks/KV_RETRIEVAL_REPORT.md` (V3: 7.4% diádico, 27.5% dense, entrenando en la
+> tarea). El run 2×T4 con vocabulario GPT-2 midió 6.2–7.7% con un protocolo zero-shot
+> cuyo relleno (ids 200–250) son bytes de control fuera de distribución — resultado no
+> concluyente por diseño. El notebook `kaggle/engrama_v4_vs_ablation_transformer_2xt4.ipynb`
+> incluye ahora un protocolo corregido (zero-shot in-distribución + inducción + KV
+> entrenado) y el análisis del techo arquitectónico en
+> `docs/ANALISIS-COMPARATIVA-4-MODELOS.md` (§3–4: superposición aditiva del estado
+> consolidado; el predictor solo ve $T_L[t]$, con contribución relativa por token ~$10^{-4}$).
+
+---
+
+## ENGRAMA V5 — sin atención, sin compresión, recuperación exacta
+
+> **V5 (1.0) + V5.1 (entrenamiento lineal)**. Diseño completo, registro de iteraciones y
+> presupuestos teóricos en [`docs/ENGRAMA-V5-Teorica.md`](docs/ENGRAMA-V5-Teorica.md);
+> el análisis forense que la motivó en
+> [`docs/ANALISIS-COMPARATIVA-4-MODELOS.md`](docs/ANALISIS-COMPARATIVA-4-MODELOS.md).
+
+### 1. Qué pasó: de V4 a V5
+
+El run 2×T4 de V4 (TinyStories, 100M tokens) dejó tres síntomas: `source_gate` ganaba a
+la V4 completa, la recuperación KV quedaba en nivel de azar y el transformer baseline
+moría a mitad de run. El análisis (E1–E5, reproducibles en
+`benchmarks/analysis_lab/`) lo explicó todo:
+
+1. **La recuperación era imposible por diseño del protocolo** (relleno con bytes de
+   control GPT-2 fuera de distribución) **y por física de la arquitectura**: el predictor
+   de V4 solo ve `T_L[t]`, una *superposición aditiva* de toda la historia. La contribución
+   de un token concreto al estado final es **~10⁻⁴** (medido): ningún ajuste de offsets
+   arregla eso. Los offsets resonantes quedaron en 6–9.5 % incluso entrenando en la tarea;
+   los densos en 27–30 %; el transformer de control en 86.8 %.
+2. **El gating dual de V4 es frágil al LR** (NaN a 6e-4; a 4e-3 la loss de la tarea se
+   clava en el marginal): el término bilineal crece con ‖T‖² y el residual sin normalizar
+   crece ~10× durante el entrenamiento, saturando las sigmoides.
+3. El transformer murió por un bug de robustez (RoPE cacheado + CUDA graphs), corregido.
+
+V5 separa los dos roles que V4 mezclaba: **transporte/suavizado** (consolidación) y
+**recuperación exacta** (pieza nueva: *Recall Tap*), y estabiliza todo lo demás.
+
+### 2. Cómo funciona
+
+```text
+        tokens ──► Encoder aislado (V1–V4 intacto) ──► T0[j]  (huella pristina, por token)
+                                                     │
+              ┌──────────────────────────────────────┤
+              ▼                                      ▼
+   Consolidación V5 (suavizado multiescala)   Recall Tap (recuperación exacta)
+   mezcla NORMALIZADA por conteo             q = P_q(T0[i])   K[j] = P_k(T0[j])
+   compuerta dual ACOTADA C·tanh(b/C)        j* = argmax_{j≤i-gap} ⟨q, K[j]⟩
+   Trace Tap a T0 (mejor pieza de V4)        lectura = T0[j*+1]   (top-1 duro)
+              │                                      │
+              └─────────► estado + g·W_r(lectura) ◄───┘
+                              │
+                              ▼
+                 Evocador fusión latente (V4) ──► logits
+```
+
+- **Encoder aislado** (pilar V1/V2): cada token se codifica sin ver a sus vecinos. De
+  aquí sale la propiedad que hace todo lo demás posible: `T0[j]` —y por tanto `K[j]`—
+  depende **solo del token j**.
+- **Traza explícita, sin comprimir** (pilar 2): la memoria guarda `T0` y `K` completos por
+  posición. Memoria **lineal**: 640 bytes/token constantes (medido de 256 a 16384
+  posiciones). No hay estado recurrente comprimido (pilar 9).
+- **Consolidación V5**: la mezcla multiescala de V4 pero **normalizada por conteo**
+  (`T_pos = Σ w_p·y_p / (Σ w_p + ε)`): convierte la suma creciente en *promedio acotado*,
+  elimina el crecimiento ×10 del residual y la fragilidad fp16/LR. La compuerta dual
+  bilineal va **acotada** por defecto. El Trace Tap a `T0` (la pieza más valiosa de V4,
+  +0.18 nats) se conserva.
+- **Recall Tap** (nuevo): la consulta aislada `q` del token actual se compara contra los
+  códigos `K` de la traza causal; **argmax duro top-1** (empates → ocurrencia más
+  reciente) y se lee la huella *completa* del token siguiente al match (`T0[j*+1]`).
+  Gradiente por *straight-through* (softmax solo en el backward). Es una lectura de
+  diccionario: **sin softmax sobre el eje temporal, sin matriz N×N, sin promedio ponderado
+  de posiciones** — sin atención en ningún sentido, a ninguna escala.
+- **Generación incremental** (la "cache nativa"): un token nuevo solo añade su `T0`/`K`
+  a los anillos y hace un matvec `O(N·d_k)` contra el anillo K. Consolidación `O(1)`
+  (offsets fijos). Un solo eje K — nada de 2·L matrices por capa.
+
+**¿Por qué no decae con la distancia?** Un argmax no atenua: el token clave a 16k
+posiciones puntúa igual que a 200. Por eso V5 se entrena a 2048 y evalúa **igual de bien
+a 16384 sin reentrenar** (no hay extrapolación posicional que aprender).
+
+### 3. Entrenamiento lineal (V5.1)
+
+Puntuar todos los pares cuesta `O(N²·d_k)`. La propiedad de aislamiento lo arregla:
+tokens iguales → códigos `K` idénticos → siempre al mismo bucket. El modo
+`rt_train_mode="lsh"` puntúa solo **~181 candidatos** por consulta:
+
+- **1 identidad** — índice exacto de la última ocurrencia del mismo token (garantizado;
+  es el candidato de inducción/ligadura),
+- **4 rescate** — posiciones más recientes,
+- **2×64 buckets LSH** — código de signos de `K` (t tablas de b bits),
+- **48 negativos muestreados** — evitan que los scores fuera de bucket deriven sin
+  oposición (sin ellos: 83.5 %; con ellos: 96.0 %).
+
+Coste `O(N·(1+t·cap+n_neg)·d_k)` — **lineal en N** (~61× menos FLOPs a 8192; ~370× a
+32k). La lectura dura conserva su semántica exacta; la generación sigue siendo el camino
+exacto. Kernels: `v5/kernels.py` fusiona score+argmax+gather (referencia torch exacta,
+paridad dif 0.0; kernel Triton para GPU con fallback automático y `validate_kernel()`).
+
+**Recomendación medida**: denso hasta ~8k (sub-milisegundo en T4), LSH desde ~16k o
+donde mande la memoria.
+
+### 4. Comparativa V4 vs V5 (todo medido, CPU 2 núcleos salvo el run Kaggle)
+
+| dimensión | V4 | V5 |
+|---|---|---|
+| Recuperación KV (entrenada en la tarea) | resonante 6.1–9.5 % · denso 27–30 % | **100.0 % denso · 96.0 % lineal (LSH)** a 2048/8192/16384 |
+| KV zero-shot (run Kaggle, protocolo OOD) | 6.2–7.7 % (azar) | — (protocolo corregido en el notebook) |
+| Física del recuerdo | ~10⁻⁴ de contribución por token | lectura dura: huella completa, sin atenuación |
+| LM toy (3 semillas, misma receta) | dual 5.909 · source 5.939 | **5.872** (transformer: 5.868 — empate) |
+| Estabilidad | residual ×10, NaN a 6e-4, loss marginal a 4e-3 | residual acotado; sin NaN en fp16/extremos/LR 10× |
+| Invarianza causal | última posición | **exacta en todas las posiciones** (empates incluidos) |
+| Memoria de contexto | lineal (traza + horizontes) | **640 B/token exactos**; ~14× menor que KV-cache transformer a 16k |
+| Generación incremental | decode plano a N≤512 (medido en T4) | 7 ms/token (CPU); **×17/×36/×88** vs recomputar a 1k/2k/4k |
+| Escalado forward | O(N) teoría (pendiente ~0–0.12 a N≤512 por overhead) | pendiente log-log **1.06** medida 256→4096 |
+| Parámetros | 20.83 M (GPT-2 vocab) | **+0.5 %** con Recall Tap incluido |
+| Entrenamiento del RT | — | denso O(N²d_k) o **LSH lineal** |
+
+### 5. Resultados clave
+
+- **KV enorme**: 100.0 % (denso) y 96.0 % (LSH lineal) a **2048 / 8192 / 16384** tokens,
+  entrenando solo a 2048 — la misma cifra exacta en las tres longitudes (azar 6.25 %).
+- **LM toy**: primera ENGRAMA que alcanza al transformer (5.872 vs 5.868).
+- **Memoria lineal sin compresión**: 640 B/token constantes; 16k tokens ≈ 10.5 MB.
+- **Cero NaN** bajo estrés (fp16 puro, entradas extremas, LR 10×, traza vacía).
+- Suite: **118/118 tests** (invarianza causal en toda posición, paridad densa↔LSH,
+  aislamiento de códigos, estabilidad, memoria lineal, conteo de parámetros).
+
+### 6. Uso
+
+```python
+from engrama import EngraModelV5, V5Config
+
+# preset (tiny|small|base|large) o config manual
+model = EngraModelV5.from_preset("base", vocab_size=50257)          # RT denso
+model = EngraModelV5(V5Config.from_preset("base", vocab_size=50257,
+                                          context_length=32768,
+                                          rt_train_mode="lsh"))      # RT lineal
+
+loss = model.forward_loss(x[:, :-1], y[:, 1:])        # entrenamiento 100% paralelo
+ids  = model.generate(prompt_ids, max_new_tokens=200) # cache nativa incremental
+model.save("ckpt"); model2 = EngraModelV5.load("ckpt")
+```
+
+Benchmarks reproducibles: `benchmarks/analysis_lab/`
+(`v5_kv_longcontext.py`, `v5_lm_toy.py`, `v5_speed_memory.py`, `v5_lsh_speed.py`).
+
+### 7. Límites honestos
+
+- El 100/96 % es en la **tarea sintética entrenada** (protocolo del benchmark del repo);
+  falta validación a escala real (TinyStories 20M+) — ese es el siguiente experimento.
+- El paso LSH en CPU paga una constante grande (gathers): en CPU usa denso; el modo LSH
+  brilla en GPU y contextos ≥16k.
+- El kernel Triton está escrito y revisado pero su **validación ejecutable requiere GPU**
+  (`validate_kernel()`; fallback automático si algo falla).
+- Entrenar el RT con densos a N muy grandes sigue siendo cuadrático: usa LSH allí.
 
 ## ⚡ Novedades y Soluciones de ENGRAMA V4
 
