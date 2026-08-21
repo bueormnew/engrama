@@ -186,6 +186,11 @@ class EngramaConfig:
     gating_mode: Optional[str] = None
     trace_tap: Optional[bool] = None
     norm_type: Optional[str] = None
+    # Acota la pre-activacion bilineal del gating dual: b' = C*tanh(b/C).
+    # None (default) = comportamiento V4 clasico. Con C~4 evita que el termino
+    # q.k (que crece con |T|^2) sature la sigmoide a 0/1 a mitad de
+    # entrenamiento sin tocar el resto de la ecuacion.
+    dual_bilinear_clamp: Optional[float] = None
 
     def __post_init__(self) -> None:
         # -- resolve version presets (explicit values win) ------------------

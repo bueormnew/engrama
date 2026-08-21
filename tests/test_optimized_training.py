@@ -81,7 +81,7 @@ class TestOptimizedLosses(unittest.TestCase):
         config = EngramaConfig(
             vocab_size=41, d_model=24, d_gate=6, d_ff=48, num_cells=2,
             num_encoder_layers=1, num_consolidation_layers=3,
-            context_length=8, version="v4",
+            context_length=8, version="v4", synapse_rank=8,
         )
         model = EngramaModel(config)
         wrapped = LanguageModelLoss(model, linear_chunk_size=4)

@@ -167,3 +167,35 @@ versionado semántico (semver).
   referencia: `ENGRAMA-Paper-Final-Verificado.md`). La versión 0.3.0 las
   conserva como presets de compatibilidad (`version="v1" | "v2"`).
 - Sin changelog individual publicado.
+
+## [0.6.1] — V5.1: entrenamiento lineal (LSH) + kernels
+
+- `rt_train_mode="lsh"`: candidatura 1 (identidad exacta) + 4 (rescate) +
+  t·cap (buckets LSH) + n_neg (negativos muestreados). Coste O(N·(1+t·cap+n_neg)·d_k).
+- KV enorme con entrenamiento LINEAL: **96.0 %** a 2048/8192/16384 (≥85 % cumplido;
+  denso 100 %). Híbrido documentado como fracaso instructivo (deriva fuera de bucket).
+- Prioridad estructural de identidad con tolerancia ULP (empates exactos no
+  sobreviven al GEMM); paridad densa↔LSH testeada.
+- `v5/kernels.py`: lectura causal argmax+gather fusionada — referencia torch
+  exacta (dif 0.0) + kernel Triton (GPU, memoria O(filas)) + fallback +
+  `validate_kernel()`.
+- Benchmarks: `v5_lsh_speed.py` (crossover denso/LSH medido), arranque
+  híbrido en `v5_kv_longcontext.py`.
+
+## [0.6.0] — ENGRAMA V5 (1.0)
+
+- **`engrama.v5`**: arquitectura nueva sin atención y sin compresión.
+  - `RecallTap`: lectura dura top-1 desde la Traza explícita (argmax causal +
+    gather, gradiente straight-through, init simétrico P_q=P_k). Recuperación
+    **100.0 %** a 8192/16384 tokens entrenando solo a 2048 (azar 6.25 %).
+  - Mezcla de consolidación **normalizada por conteo** + bilineal acotada +
+    trace tap: acota el residual (adiós crecimiento ×10 / fragilidad fp16).
+  - `V5Trace`: anillos preasignados T0/K (640 bytes/token constantes),
+    FIFO circular, horizontes mínimos. Generación incremental 7–9 ms/token
+    (CPU) con aceleración ×17–×75 vs recomputar.
+  - Invarianza causal paralelo == incremental exacta en toda posición.
+  - API: `EngraModelV5.from_preset/save/load`, `forward_loss`, `generate`.
+- Tests nuevos (15) + benchmarks (`v5_kv_longcontext`, `v5_lm_toy`,
+  `v5_speed_memory`) + `examples/04_v5_quickstart.py`.
+- Documentación: `docs/ENGRAMA-V5-Teorica.md` (diseño, 6 iteraciones
+  documentadas, resultados verificados), README sección V5.

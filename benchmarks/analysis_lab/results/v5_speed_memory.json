@@ -1,0 +1,58 @@
+{
+ "device": "cpu",
+ "threads": 1,
+ "train_step_seq512": {
+  "seconds": 0.8095943510006691,
+  "batch": 4,
+  "seq": 512,
+  "tokens_per_sec": 2529.6619195386497
+ },
+ "train_step_seq1024": {
+  "seconds": 0.7720745770002395,
+  "batch": 2,
+  "seq": 1024,
+  "tokens_per_sec": 2652.593494215475
+ },
+ "gen_ctx1024": {
+  "ms_per_token": 7.488161099900026,
+  "tokens_per_sec": 133.54413542376258,
+  "full_forward_s": 0.1254214945001877,
+  "speedup_vs_recompute": 16.749305046583757
+ },
+ "gen_ctx2048": {
+  "ms_per_token": 7.113380099872302,
+  "tokens_per_sec": 140.58014417336588,
+  "full_forward_s": 0.25443232050020015,
+  "speedup_vs_recompute": 35.76813229828217
+ },
+ "gen_ctx4096": {
+  "ms_per_token": 6.919539099908434,
+  "tokens_per_sec": 144.5182960254149,
+  "full_forward_s": 0.6099482379995607,
+  "speedup_vs_recompute": 88.14868001940073
+ },
+ "cache_bytes_per_token": [
+  640.0,
+  640.0,
+  640.0,
+  640.0
+ ],
+ "cache_slope_bytes_per_token2": 0.0,
+ "forward_scaling": {
+  "ns": [
+   256,
+   512,
+   1024,
+   2048,
+   4096
+  ],
+  "seconds": [
+   0.03187044199967204,
+   0.06418772699998954,
+   0.13144833949991153,
+   0.2682588934994783,
+   0.6055246650003028
+  ],
+  "loglog_slope": 1.0559046210766514
+ }
+}

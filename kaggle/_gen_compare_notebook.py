@@ -39,7 +39,7 @@ Comparación **controlada** de cuatro modelos de ~20M parámetros, entrenados co
 | `engrama_v4` | ENGRAMA V4 **completo** | nada (dual gating + Trace Tap T0 + offsets resonantes + RMSNorm + latent fusion) |
 | `engrama_source_gate` | ENGRAMA V4 limitado | **gating dual target-source** → gating V3 source-only |
 | `engrama_no_tracetap` | ENGRAMA V4 limitado | **Trace Tap T0** (bypass a la huella prístina) |
-| `transformer` | Decoder GPT con RoPE + RMSNorm + SDPA causal | — (baseline con atención \(O(N^2)\)) |
+| `transformer` | Decoder GPT con RoPE + RMSNorm + SDPA causal | — (baseline con atención \\(O(N^2)\\)) |
 
 **Hardware objetivo:** Kaggle 2× Tesla T4 16 GB. **Presupuesto:** < 3 h para los 4 entrenamientos + mediciones.
 
@@ -526,6 +526,26 @@ cells.append(code(r"""def _metrics_complete(path):
     return metrics
 
 
+def _run_tee(cmd, cwd, env, log_path, tail_lines=25):
+    # Ejecuta streameando la salida y guardandola completa a disco; si falla,
+    # quedan las ultimas lineas impresas y el log completo para post-mortem.
+    import subprocess as _sp
+    proc = _sp.Popen(cmd, cwd=cwd, env=env, stdout=_sp.PIPE, stderr=_sp.STDOUT,
+                     text=True, bufsize=1)
+    with open(log_path, 'w', encoding='utf-8') as log:
+        for line in proc.stdout:
+            print(line, end='', flush=True)
+            log.write(line)
+    proc.wait()
+    if proc.returncode != 0:
+        with open(log_path, 'r', encoding='utf-8') as f:
+            tail = f.readlines()[-tail_lines:]
+        print('--- ultimas %d lineas de %s ---' % (tail_lines, log_path), flush=True)
+        for line in tail:
+            print('   ', line.rstrip(), flush=True)
+    return proc
+
+
 def run_train(arch, max_steps=0):
     out = os.path.join(SAVE_ROOT, arch)
     os.makedirs(out, exist_ok=True)
@@ -584,10 +604,31 @@ def run_train(arch, max_steps=0):
     env.setdefault('TORCHINDUCTOR_FX_GRAPH_CACHE', '1')
     env['TORCHINDUCTOR_CACHE_DIR'] = os.path.join(WORK_DIR, '.inductor_cache')
     t0 = time.time()
-    proc = subprocess.run(cmd, cwd=WORK_DIR, env=env)
+    log_path = os.path.join(SAVE_ROOT, '%s_train.log' % arch)
+    proc = _run_tee(cmd, cwd=WORK_DIR, env=env, log_path=log_path)
     elapsed = time.time() - t0
     if proc.returncode != 0:
-        print('FALLO %s  rc=%s  (%.1f min)' % (arch, proc.returncode, elapsed / 60.0), flush=True)
+        print('FALLO %s  rc=%s  (%.1f min)  log completo: %s' % (
+            arch, proc.returncode, elapsed / 60.0, log_path), flush=True)
+        # Reintento sin torch.compile: compile/cudagraphs es la primera sospechosa
+        # (fue lo que mato al transformer en el run anterior: RoPE cacheado +
+        # CUDA graphs). El reintento preserva el presupuesto de entrenamiento.
+        cleaned, skip = [], False
+        for c in cmd:
+            if skip:
+                skip = False; continue
+            if c == '--compile-mode':
+                skip = True; continue
+            cleaned.append(c)
+        cleaned.insert(cleaned.index(worker_path) + 1, '--no-compile')
+        print('REINTENTO sin compile:', ' '.join(cleaned), flush=True)
+        t0 = time.time()
+        proc = _run_tee(cleaned, cwd=WORK_DIR, env=env,
+                        log_path=os.path.join(SAVE_ROOT, '%s_retry.log' % arch))
+        elapsed = time.time() - t0
+    if proc.returncode != 0:
+        print('FALLO definitivo %s  rc=%s  (%.1f min)' % (
+            arch, proc.returncode, elapsed / 60.0), flush=True)
         return None
     if not os.path.isfile(metrics_path):
         print('FALLO %s: no hay metrics.json' % arch, flush=True)
@@ -668,15 +709,17 @@ cells.append(md("""## 9. Tokens/s, VRAM vs contexto, orden de complejidad
 
 Se mide el **forward paralelo** (prefill / paso de entrenamiento a batch 1) a longitudes 64, 128, 256, 512 (y 768 si cabe).
 
-Ajuste \(\log t = a + b \log N\):
-- \(b \approx 1\) → **O(N)** (ENGRAMA)
-- \(b \approx 2\) → **O(N²)** (atención)
-- \(b \approx 0\) → **O(1)**
+Ajuste \\(\log t = a + b \log N\\):
+- \\(b \approx 1\\) → **O(N)** (ENGRAMA)
+- \\(b \approx 2\\) → **O(N²)** (atención)
+- \\(b \approx 0\\) → **O(1)**
 
 También se mide **decode incremental** (ENGRAMA `step_forward` con caché jerárquica vs Transformer re-prefill) para ver si el coste por token nuevo es constante.
 """))
 
-cells.append(code(r"""LENGTHS = [64, 128, 256, 512] if not FAST_MODE else [32, 64, 128]
+cells.append(code(r"""# 64..2048: con N<=512 el coste fijo (pesos, launches) domina y toda
+# pendiente parece 0; ampliando el rango la pendiente log-log se vuelve honesta.
+LENGTHS = [64, 128, 256, 512, 1024, 2048] if not FAST_MODE else [32, 64, 128]
 
 
 def _sync():
@@ -810,51 +853,161 @@ with open(os.path.join(SAVE_ROOT, 'scale_report.json'), 'w', encoding='utf-8') a
     json.dump(scale_report, f, indent=2)
 """))
 
-cells.append(md("""## 10. Recuperación clave-valor a largo alcance (zero-shot)
+cells.append(md("""## 9b. Introspección de compuertas (diagnóstico dual vs source)
 
-Protocolo tipo MQAR sobre el vocabulario GPT-2:
-
-- 4 pares (clave, valor) aleatorios **por muestra** (no se pueden memorizar globalmente)
-- cuerpo de relleno + consultas a distancias ~32, 80, 128, 184 (secuencia 192)
-- se puntúa **opción múltiple entre los 16 valores posibles** (azar = 6.25 %) y exact-match sobre 50k
-
-Es una prueba **arquitectónica** (no se fine-tunéa): mide si la señal del par sobrevive en el contexto. V4 debería ganar a las ablaciones; el Transformer atiende \(O(N^2)\) y es una cota alta de recuperación a 192 tokens.
+Mide, con los checkpoints entrenados y un batch real de TinyStories: apertura
+media y saturación de \\\\(\\\\alpha\\\\), \\\\(\\\\rho\\\\), \\\\(\\\\beta\\\\) y magnitud del estado por capa.
+Si el gating dual satura (\\\\(\\\\alpha\\\\) pegado a 0/1) sus compuertas dejan de
+ser modulables y V4 puede perder contra source gating aunque tenga mas
+parametros: aqui se ve directamente.
 """))
 
-cells.append(code(r"""KV_SEQ = 192
+cells.append(code(r"""@torch.no_grad()
+def gate_introspection(model, n_tokens=2048):
+    x = torch.from_numpy(
+        np.asarray(train_mm[:n_tokens], dtype=np.int64)[: (n_tokens // 512) * 512].reshape(-1, 512)
+    ).to(BENCH_DEVICE)
+    stats = []
+    T0 = model.encoder(model.embeddings(x))
+    t = T0
+    for li, layer in enumerate(model.consolidation.layers):
+        mix = layer.mix
+        offsets = [p_ for p_ in mix.offsets if p_ < t.size(1)]
+        keys = [str(p_) for p_ in offsets]
+        k_src = mix._causal_views(mix.p_g_src(t), offsets)
+        ws = torch.stack([mix.gate_w_src[k] for k in keys])
+        bs = torch.stack([mix.gate_b[k] for k in keys])
+        pre = torch.einsum('bnpq,pqd->bnpd', k_src, ws) + bs
+        bil_std = 0.0
+        if mix.gating_mode == 'dual' and mix.p_g_tgt is not None:
+            q = mix.p_g_tgt(t)
+            wt = torch.stack([mix.gate_w_tgt[k] for k in keys])
+            bil = (q.unsqueeze(2) * k_src).sum(-1, keepdim=True) / math.sqrt(mix.d_gate)
+            pre = pre + torch.einsum('bnq,pqd->bnpd', q, wt) + bil
+            bil_std = float(bil.std())
+        g = torch.sigmoid(pre.float())
+        rho = torch.sigmoid(torch.stack([mix.rho[k] for k in keys]).float())
+        beta = torch.stack([mix.beta[k] for k in keys]).float().view(-1)
+        stats.append({
+            'layer': li, 'offsets': offsets,
+            'gate_mean': float(g.mean()), 'gate_sat': float(((g > .95) | (g < .05)).float().mean()),
+            'bilinear_std': bil_std, 'rho_mean': float(rho.mean()),
+            'beta_mean': float(beta.mean()), 'state_std': float(t.float().std()),
+        })
+        t = layer.forward_train(t, T_0=T0)
+    return stats
+
+
+gates_report = {}
+for arch, model in loaded.items():
+    if not hasattr(model, 'consolidation'):
+        continue
+    gates_report[arch] = gate_introspection(model)
+    print('---', arch, '---')
+    print(' L  offsets            alpha_med  sat5%   bil_std  rho    beta   |T_l|')
+    for st in gates_report[arch]:
+        print(' %d  %-18s %.3f     %5.1f%%  %.3f    %.3f  %.3f  %.3f' % (
+            st['layer'], str(st['offsets']), st['gate_mean'], 100 * st['gate_sat'],
+            st['bilinear_std'], st['rho_mean'], st['beta_mean'], st['state_std']))
+
+with open(os.path.join(SAVE_ROOT, 'gates_report.json'), 'w', encoding='utf-8') as f:
+    json.dump(gates_report, f, indent=2)
+"""))
+
+cells.append(md("""## 10. Recuperación KV — protocolo corregido (3 instrumentos)
+
+El protocolo antiguo usaba como relleno los ids GPT-2 200–250. Esos ids son
+**bytes de control** (0x0C–0x1F, DEL, C1: el mapeo byte→id de GPT-2 pone el
+espacio en 220 y los bytes de control en 188–254), tokens que **no aparecen
+ni una vez** en TinyStories: ningún modelo entrenado en texto natural los ha
+visto en contexto, así que el zero-shot era estructuralmente de azar para
+cualquier arquitectura (incluido el Transformer).
+
+Tres instrumentos, cada uno midiendo una cosa distinta:
+
+1. **Zero-shot in-distribución**: pares clave-valor con tokens *frecuentes del
+   propio train* (elegidos por frecuencia real). Mide si la señal sobrevive sin
+   entrenar la tarea. Azar = 1/16 = 6.25 %.
+2. **Inducción/copia zero-shot**: una secuencia de 8 tokens frecuentes se
+   repite tras un gap; el modelo debe predecir la continuación correcta entre
+   las 8 vistas (circuito de inducción). Azar = 12.5 %.
+3. **KV entrenado (fine-tune corto, presupuesto idéntico)**: 250 pasos sobre la
+   tarea sintética (protocolo adaptado de `benchmarks/kv_retrieval.py` del
+   repo). Mide la **capacidad arquitectónica** de vincular y recuperar, sin
+   confundirla con el entrenamiento previo en TinyStories.
+
+> Nota teórica: en ENGRAMA el predictor solo ve \\(T_L[t]\\) (d=256), una
+> superposición aditiva de toda la historia con decaimiento por saltos; la
+> contribución relativa de un token lejano es ~\\(10^{-4}\\) del estado
+> final. El KV entrenado dice cuánto de ese techo rescatan las compuertas
+> duales y el trace tap. (Ver `benchmarks/KV_RETRIEVAL_REPORT.md`: incluso
+> entrenado, V3-dyadic quedó en 7.4 % vs 27.5 % de dense_dilated.)
+"""))
+
+cells.append(code(r"""# ---------- tokens in-distribucion por frecuencia real ----------
+import copy as _copy
+FREQ_SAMPLE = min(5_000_000, len(train_mm))
+counts = np.bincount(np.asarray(train_mm[:FREQ_SAMPLE], dtype=np.int64), minlength=VOCAB_SIZE)
+order = [int(t) for t in np.argsort(-counts) if int(t) != EOS_ID]  # ids por frecuencia
+
+def freq_band(lo_rank, hi_rank, n, rng):
+    pool = order[lo_rank:hi_rank]
+    return rng.sample(pool, n)
+
+KV_SEQ = 192
 N_KEYS = 4
-KEY_LO, KEY_HI = 1000, 1020
-VAL_LO, VAL_HI = 2000, 2015   # 16 valores
-FILL_LO, FILL_HI = 200, 250
+N_VALUES = 16
 HEADER_SLOTS = [0, 2, 4, 6]
 QUERY_POSITIONS = [32, 80, 128, 184]
-N_VALUES = VAL_HI - VAL_LO + 1
 CHANCE = 1.0 / N_VALUES
+
+_tok_rng = random.Random(4242)
+KEY_POOL = freq_band(600, 900, 21, _tok_rng)          # 21 claves frecuentes
+VAL_POOL = freq_band(1200, 1600, N_VALUES, _tok_rng)  # 16 valores frecuentes
+FILL_POOL = freq_band(100, 400, 12, _tok_rng)         # relleno frecuente
+print('claves   :', [repr(tokenizer.decode([t])) for t in KEY_POOL[:5]])
+print('valores  :', [repr(tokenizer.decode([t])) for t in VAL_POOL[:5]])
+print('relleno  :', [repr(tokenizer.decode([t])) for t in FILL_POOL[:5]])
 
 
 def make_kv_sample(rng):
-    keys = rng.sample(range(KEY_LO, KEY_HI + 1), N_KEYS)
-    values = [rng.randint(VAL_LO, VAL_HI) for _ in range(N_KEYS)]
+    keys = rng.sample(KEY_POOL, N_KEYS)
+    values = rng.sample(VAL_POOL, N_KEYS)
     value_of = dict(zip(keys, values))
-    seq = [EOS_ID] + [FILL_LO] * (KV_SEQ - 1)
+    seq = [EOS_ID] + [FILL_POOL[0]] * (KV_SEQ - 1)
     used = {0}
     for slot, (k, v) in zip(HEADER_SLOTS, zip(keys, values)):
         seq[1 + slot] = k
         seq[1 + slot + 1] = v
-        used.add(1 + slot); used.add(1 + slot + 1)
+        used.update({1 + slot, 1 + slot + 1})
     query_order = keys[:]
     rng.shuffle(query_order)
     answers = []
     for pos, key in zip(QUERY_POSITIONS, query_order):
         seq[pos] = key
         seq[pos + 1] = value_of[key]
-        used.add(pos); used.add(pos + 1)
-        answers.append((pos, value_of[key]))  # predecir seq[pos+1] desde logits[pos]
-    body = [rng.randint(FILL_LO, FILL_HI) for _ in range(8)]
+        used.update({pos, pos + 1})
+        answers.append((pos, value_of[key]))
+    body = [rng.choice(FILL_POOL) for _ in range(8)]
     for i in range(KV_SEQ):
         if i not in used:
             seq[i] = body[i % 8]
     return seq, answers
+
+
+def logits_at(model, x, positions):
+    # Logits de vocabulario SOLO en las posiciones pedidas: (B, K, V)
+    feats = model.forward_features(x)
+    b, t, d = feats.shape
+    sel = (torch.arange(b, device=x.device)[:, None] * t + positions).reshape(-1)
+    if hasattr(model, 'evoker'):
+        fused = model.evoker.fused_latent(feats)  # latent_fusion / mean
+        hf = fused.reshape(-1, d)[sel].view(b, positions.size(1), d)
+        logits = F.linear(hf, model.output_embeddings) * (1.0 / math.sqrt(d))
+    else:
+        h = feats.reshape(-1, d)[sel].view(b, positions.size(1), d)
+        logits = F.linear(h, model.tok_emb.weight)
+    return logits
 
 
 @torch.no_grad()
@@ -866,7 +1019,7 @@ def eval_kv(model, n_samples=256 if not FAST_MODE else 32, seed=999):
     exact_correct = [0] * N_KEYS
     total = 0
     remaining = n_samples
-    value_ids = torch.arange(VAL_LO, VAL_HI + 1, device=BENCH_DEVICE)
+    value_ids = torch.tensor(VAL_POOL, device=BENCH_DEVICE)
     while remaining > 0:
         b = min(16, remaining)
         remaining -= b
@@ -876,13 +1029,13 @@ def eval_kv(model, n_samples=256 if not FAST_MODE else 32, seed=999):
             seqs.append(s)
             answers.append(a)
         x = torch.tensor(seqs, dtype=torch.long, device=BENCH_DEVICE)
+        pos = torch.tensor([[p for p, _ in ans] for ans in answers], device=BENCH_DEVICE)
         with torch.autocast('cuda', dtype=torch.float16, enabled=amp):
-            logits = model(x[:, :-1])  # (B, T-1, V)
+            logits = logits_at(model, x[:, :-1], pos)
         logits = logits.float()
         for row, ans in enumerate(answers):
-            for qi, (pos, value) in enumerate(ans):
-                # logits[:, pos] predice el token en pos+1
-                row_logits = logits[row, pos]
+            for qi, (p, value) in enumerate(ans):
+                row_logits = logits[row, qi]
                 exact_correct[qi] += int(int(row_logits.argmax().item()) == value)
                 mc_scores = row_logits[value_ids]
                 pred = int(value_ids[mc_scores.argmax()].item())
@@ -893,6 +1046,7 @@ def eval_kv(model, n_samples=256 if not FAST_MODE else 32, seed=999):
         'overall_exact': sum(exact_correct) / max(1, n_samples * N_KEYS),
         'chance_mc': CHANCE,
         'n_samples': n_samples,
+        'token_protocol': 'in-distribution (frecuencia real del train)',
     }
     for qi in range(N_KEYS):
         dist = QUERY_POSITIONS[qi] - (max(HEADER_SLOTS) + 2)
@@ -901,16 +1055,96 @@ def eval_kv(model, n_samples=256 if not FAST_MODE else 32, seed=999):
     return out
 
 
+# ---------- 2) sonda de induccion (copia de secuencia repetida) ----------
+IND_LEN = 8
+IND_GAP = 48
+IND_CHANCE = 1.0 / IND_LEN
+
+
+def make_induction_sample(rng):
+    core = rng.sample(order[100:400], IND_LEN)   # 8 tokens frecuentes distintos
+    gap = [rng.choice(FILL_POOL) for _ in range(IND_GAP)]
+    seq = [EOS_ID] + core + gap + [core[0]] + core[1:]
+    answer_pos = 1 + IND_LEN + IND_GAP           # logits aqui predicen core[1]
+    return seq, answer_pos, core[1], core
+
+
+@torch.no_grad()
+def eval_induction(model, n_samples=256 if not FAST_MODE else 32, seed=777):
+    rng = random.Random(seed)
+    model.eval()
+    amp = BENCH_DEVICE.type == 'cuda'
+    correct = 0
+    remaining = n_samples
+    while remaining > 0:
+        b = min(16, remaining)
+        remaining -= b
+        seqs, apos, ans, cores = [], [], [], []
+        for _ in range(b):
+            s, p, a, c = make_induction_sample(rng)
+            seqs.append(s); apos.append(p); ans.append(a); cores.append(c)
+        x = torch.tensor(seqs, dtype=torch.long, device=BENCH_DEVICE)
+        pos = torch.tensor([[p] for p in apos], device=BENCH_DEVICE)
+        with torch.autocast('cuda', dtype=torch.float16, enabled=amp):
+            logits = logits_at(model, x[:, :-1], pos)
+        logits = logits.float()[:, 0]
+        for row in range(b):
+            cands = torch.tensor(cores[row], device=BENCH_DEVICE)
+            pred = int(cands[logits[row][cands].argmax()].item())
+            correct += int(pred == ans[row])
+    return {'overall': correct / max(1, n_samples), 'chance': IND_CHANCE,
+            'protocol': 'induccion: 8 continuaciones posibles, gap 48'}
+
+
+# ---------- 3) KV entrenado: fine-tune corto, presupuesto identico ----------
+def finetune_kv(model, steps=300 if not FAST_MODE else 8, lr=1.5e-4, bs=16, seed=31337):
+    rng = random.Random(seed)
+    model.train()
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95), weight_decay=0.01)
+    def sched(s):
+        warm = min(1.0, (s + 1) / 20)
+        return warm * 0.5 * (1 + math.cos(math.pi * min(1.0, s / steps)))
+    amp = BENCH_DEVICE.type == 'cuda'
+    for step in range(steps):
+        for g in opt.param_groups:
+            g['lr'] = lr * sched(step)
+        seqs, answers = [], []
+        for _ in range(bs):
+            s, a = make_kv_sample(rng)
+            seqs.append(s); answers.append(a)
+        x = torch.tensor(seqs, dtype=torch.long, device=BENCH_DEVICE)
+        y = torch.tensor([[v for _, v in ans] for ans in answers], device=BENCH_DEVICE)
+        pos = torch.tensor([[p for p, _ in ans] for ans in answers], device=BENCH_DEVICE)
+        opt.zero_grad(set_to_none=True)
+        with torch.autocast('cuda', dtype=torch.float16, enabled=amp):
+            logits = logits_at(model, x[:, :-1], pos)
+            loss = F.cross_entropy(logits.float().reshape(-1, VOCAB_SIZE), y.reshape(-1))
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+        if step % 50 == 0:
+            print('    ft step %d loss %.3f' % (step, float(loss.item())), flush=True)
+    model.eval()
+    return model
+
+
 kv_report = {}
 for arch, model in loaded.items():
     print('KV', arch, '...')
-    kv_report[arch] = eval_kv(model)
-    r = kv_report[arch]
-    print('  MC overall=%.1f%% (azar %.1f%%)  exact=%.1f%%' % (
-        100 * r['overall_mc'], 100 * r['chance_mc'], 100 * r['overall_exact']))
-    for k, v in r.items():
-        if k.startswith('mc_distance_'):
-            print('   ', k, '= %.1f%%' % (100 * v))
+    zero = eval_kv(model)
+    indu = eval_induction(model)
+    print('  zero-shot in-dist  MC=%.1f%% (azar %.1f%%) | induccion=%.1f%% (azar %.1f%%)' % (
+        100 * zero['overall_mc'], 100 * zero['chance_mc'],
+        100 * indu['overall'], 100 * indu['chance']))
+    model_bk = _copy.deepcopy(model)
+    finetune_kv(model)
+    trained = eval_kv(model, n_samples=256 if not FAST_MODE else 32)
+    print('  KV entrenado       MC=%.1f%%  cerca=%.1f%%  lejos=%.1f%%' % (
+        100 * trained['overall_mc'],
+        100 * trained['mc_distance_24'], 100 * trained['mc_distance_176']))
+    kv_report[arch] = {'zero_shot': zero, 'induction': indu, 'trained': trained}
+    model.load_state_dict(model_bk.state_dict())  # no contaminar el resto de benches
+    del model_bk
 
 with open(os.path.join(SAVE_ROOT, 'kv_report.json'), 'w', encoding='utf-8') as f:
     json.dump(kv_report, f, indent=2)
@@ -1023,34 +1257,30 @@ for arch in ARCHS:
         'mem_pendiente': sc.get('memory_slope'),
         'decode_orden': sc.get('decode_order'),
         'decode_pendiente': sc.get('decode_slope'),
-        'kv_mc': kv.get('overall_mc'),
-        'kv_exact': kv.get('overall_exact'),
-        'kv_d32': kv.get('mc_distance_24') or kv.get('mc_distance_32'),
-        'kv_far': None,
+        'kv_zero': (kv.get('zero_shot') or {}).get('overall_mc'),
+        'kv_zero_exact': (kv.get('zero_shot') or {}).get('overall_exact'),
+        'kv_induction': (kv.get('induction') or {}).get('overall'),
+        'kv_trained': (kv.get('trained') or {}).get('overall_mc'),
+        'kv_d32': (kv.get('trained') or {}).get('mc_distance_24'),
+        'kv_far': (kv.get('trained') or {}).get('mc_distance_176'),
     })
-    # last distance key
-    if kv:
-        dist_keys = sorted([k for k in kv if k.startswith('mc_distance_')])
-        if dist_keys:
-            rows[-1]['kv_d32'] = kv[dist_keys[0]]
-            rows[-1]['kv_far'] = kv[dist_keys[-1]]
 
 print('=' * 88)
 print('RESUMEN COMPARATIVO  |  TinyStories 100M tok  |  GPT-2 vocab  |  seq 512  |  2xT4 DDP')
 print('=' * 88)
-hdr = ('%-22s %7s %10s %8s %10s %10s %8s %7s %11s %11s' % (
+hdr = ('%-22s %7s %10s %8s %10s %10s %8s %7s %11s %8s %8s %8s' % (
     'modelo', 'params', 'val_loss', 'ppl', 'tok/s', 's/paso', 'min', 'skip',
-    'fwd orden', 'KV-MC'))
+    'fwd orden', 'KV-zero', 'inducc', 'KV-ft'))
 print(hdr)
 print('-' * 88)
 for r in rows:
-    print('%-22s %6.2fM %10s %8s %10s %10s %8s %7s %11s %11s' % (
+    print('%-22s %6.2fM %10s %8s %10s %10s %8s %7s %11s %8s %8s %8s' % (
         r['arch'], r['params_M'],
         fmt_num(r['val_loss']), fmt_num(r['val_ppl'], 2),
         fmt_num(r['tok_s'], 0), fmt_num(r['sec_paso'], 3),
         fmt_num(r['minutos'], 1), fmt_num(r['skip_nan'], 0),
         r['forward_orden'] or '—',
-        fmt_pct(r['kv_mc']),
+        fmt_pct(r['kv_zero']), fmt_pct(r['kv_induction']), fmt_pct(r['kv_trained']),
     ))
 
 print('\n--- Detalle arquitectónico ---')
@@ -1081,11 +1311,13 @@ for arch in ARCHS:
         print(' %8s' % (fmt_num(peak, 2) if peak is not None else '—'), end='')
     print()
 
-print('\n--- Recuperación KV (opción múltiple / 16 valores, azar = %.1f%%) ---' % (100 * CHANCE))
-print('%-22s %10s %10s %10s %10s' % ('modelo', 'overall', 'cerca', 'lejos', 'exact 50k'))
+print('\n--- Recuperación KV (MC/16 valores, azar = 6.2%%) ---')
+print('%-22s %12s %12s %12s %10s %10s' % ('modelo', 'zero in-dist', 'inducción*', 'ft 250p', 'cerca', 'lejos'))
 for r in rows:
-    print('%-22s %10s %10s %10s %10s' % (
-        r['arch'], fmt_pct(r['kv_mc']), fmt_pct(r['kv_d32']), fmt_pct(r['kv_far']), fmt_pct(r['kv_exact'])))
+    print('%-22s %12s %12s %12s %10s %10s' % (
+        r['arch'], fmt_pct(r['kv_zero']), fmt_pct(r['kv_induction']),
+        fmt_pct(r['kv_trained']), fmt_pct(r['kv_d32']), fmt_pct(r['kv_far'])))
+print('  * inducción: azar = 12.5%%.  zero in-dist y ft: azar = 6.25%%.')
 
 print('\n--- Entrenamiento ---')
 print('%-22s %12s %12s %12s %10s %10s' % (
@@ -1117,10 +1349,14 @@ if ranked:
 tok_ranked = sorted([r for r in rows if r['tok_s']], key=lambda r: r['tok_s'] or 0, reverse=True)
 if tok_ranked:
     print('  Más tok/s train    :', tok_ranked[0]['arch'], fmt_num(tok_ranked[0]['tok_s'], 0))
-kv_ranked = sorted([r for r in rows if r['kv_mc'] is not None], key=lambda r: r['kv_mc'] or 0, reverse=True)
+kv_ranked = sorted([r for r in rows if r['kv_trained'] is not None], key=lambda r: r['kv_trained'] or 0, reverse=True)
 if kv_ranked:
-    print('  Mejor KV-MC        :', kv_ranked[0]['arch'], fmt_pct(kv_ranked[0]['kv_mc']))
+    print('  Mejor KV entrenado :', kv_ranked[0]['arch'], fmt_pct(kv_ranked[0]['kv_trained']))
+kv0_ranked = sorted([r for r in rows if r['kv_zero'] is not None], key=lambda r: r['kv_zero'] or 0, reverse=True)
+if kv0_ranked:
+    print('  Mejor KV zero-shot :', kv0_ranked[0]['arch'], fmt_pct(kv0_ranked[0]['kv_zero']))
 print('  Complejidad ENGRAMA (teoría): forward O(N), decode con caché ~O(1) por token (offsets fijos).')
+print('  (La pendiente empírica a N<=512 se lee ~plana por overhead fijo; ver N hasta 2048.)')
 print('  Complejidad Transformer (teoría): forward O(N²), decode con KV-cache O(N) por token.')
 print('=' * 88)
 
@@ -1182,12 +1418,19 @@ else:
     labels, vals = [], []
     for arch in ARCHS:
         kv = kv_report.get(arch) or {}
-        if 'overall_mc' in kv:
+        tr = (kv.get('trained') or {}).get('overall_mc')
+        zs = (kv.get('zero_shot') or {}).get('overall_mc')
+        if tr is not None:
             labels.append(arch.replace('engrama_', 'e_'))
-            vals.append(100 * kv['overall_mc'])
+            vals.append(100 * tr)
     if vals:
-        ax.bar(labels, vals)
-        ax.axhline(100 * CHANCE, color='k', ls='--', label='azar')
+        xs = range(len(vals))
+        ax.bar(xs, vals, label='entrenado 250p')
+        zs_vals = [100 * ((kv_report.get(a) or {}).get('zero_shot') or {}).get('overall_mc', 0)
+                   for a in ARCHS if ((kv_report.get(a) or {}).get('trained') or {}).get('overall_mc') is not None]
+        ax.scatter(list(xs), zs_vals, color='tab:orange', zorder=3, label='zero-shot in-dist')
+        ax.set_xticks(list(xs)); ax.set_xticklabels(labels)
+        ax.axhline(100 * CHANCE, color='k', ls='--', label='azar 6.25%')
         ax.set_ylabel('% MC'); ax.set_title('KV retrieval (MC)'); ax.legend()
         ax.tick_params(axis='x', rotation=20)
     fig.tight_layout()
