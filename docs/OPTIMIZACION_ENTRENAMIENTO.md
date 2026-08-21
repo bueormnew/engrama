@@ -25,6 +25,17 @@ La VRAM al 50 % no es un problema: DDP mantiene deliberadamente una réplica en
 cada GPU. Lo importante es que ambas procesen lotes distintos y solo comuniquen
 buckets de gradientes.
 
+Un 20M a batch 16×512 en T4 **no está limitado por FLOPs**: está limitado por
+lanzamientos de kernel y por sincronizaciones CPU. En el comparador 4-modelos
+eso se veía como ~0.27 s/paso y ~60k tok/s con la GPU “poco ocupada”. La receta
+correcta (sin cambiar ecuaciones ni batch, para no romper un run ya entrenado):
+
+1. No llamar `.item()` / `torch.isfinite(loss)` en cada step (GradScaler ya
+   descarta updates no finitos).
+2. `linear_chunk_size >= local_batch * seq_len` para un solo GEMM de CE.
+3. `torch.compile(..., mode="reduce-overhead")` (CUDA graphs) en formas
+   estáticas 16×512. `max-autotune` avisa `Not enough SMs` en T4 (40 SMs).
+
 ## Ruta recomendada: DDP
 
 Tras crear los ficheros `tinystories_train.ids` y `tinystories_valid.ids` del

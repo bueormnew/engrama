@@ -165,12 +165,11 @@ def linear_cross_entropy(
         raise ValueError("chunk_size must be >= 1")
 
     scale_t = flat_h.new_tensor(scale)
-    total = flat_h.new_zeros((), dtype=torch.float32)
-    for start in range(0, flat_h.size(0), chunk_size):
-        h = flat_h[start : start + chunk_size]
-        y = flat_y[start : start + chunk_size]
+    n_tokens = flat_h.size(0)
+
+    def _one(h: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         if checkpoint_chunks and torch.is_grad_enabled():
-            part = checkpoint(
+            return checkpoint(
                 _linear_ce_chunk,
                 h,
                 weight,
@@ -179,8 +178,18 @@ def linear_cross_entropy(
                 ignore_index,
                 use_reentrant=False,
             )
-        else:
-            part = _linear_ce_chunk(h, weight, y, scale_t, ignore_index)
-        total = total + part
+        return _linear_ce_chunk(h, weight, y, scale_t, ignore_index)
+
+    # One shot when the position chunk covers the whole batch: avoids a Python
+    # loop (and torch.compile graph breaks) of 4+ tiny vocabulary GEMMs.
+    if n_tokens <= chunk_size:
+        total = _one(flat_h, flat_y)
+    else:
+        total = flat_h.new_zeros((), dtype=torch.float32)
+        for start in range(0, n_tokens, chunk_size):
+            total = total + _one(
+                flat_h[start : start + chunk_size],
+                flat_y[start : start + chunk_size],
+            )
     denominator = (flat_y != ignore_index).sum().clamp_min(1)
     return total / denominator
