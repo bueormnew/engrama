@@ -94,6 +94,7 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '30')
 os.environ.setdefault('NCCL_P2P_DISABLE', '1')
 os.environ.setdefault('NCCL_IB_DISABLE', '1')
+os.environ.setdefault('TORCHINDUCTOR_FX_GRAPH_CACHE', '1')
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 NGPU = torch.cuda.device_count() if DEVICE == 'cuda' else 0
@@ -138,9 +139,9 @@ WARMUP_STEPS = 500
 LOG_EVERY = 50
 EVAL_EVERY = 500
 EVAL_BATCHES = 25
-LINEAR_CHUNK = 2048
+LINEAR_CHUNK = max(2048, LOCAL_BATCH * SEQ_LEN)  # un GEMM de CE, no 4 kernels
 COMPILE = True
-COMPILE_MODE = 'default'  # max-autotune gasta demasiado compile-time x 4 modelos
+COMPILE_MODE = 'reduce-overhead'  # CUDA graphs: el modelo 20M está limitado por launches, no por FLOPs
 RESUME = True
 
 TRAIN_FILE = 'tinystories_train.txt'
@@ -158,7 +159,7 @@ os.makedirs(SAVE_ROOT, exist_ok=True)
 NPROC = max(1, min(2, NGPU)) if NGPU else 1
 GLOBAL_BATCH = LOCAL_BATCH * NPROC
 TOKENS_PER_STEP = GLOBAL_BATCH * SEQ_LEN
-# 100M / (32*512) ≈ 6104 pasos. A 0.25 s/paso x 4 modelos ≈ 1.7 h de train.
+# 100M / (32*512) ≈ 6104 pasos. Tras quitar syncs CPU y CUDA graphs, ~0.15–0.20 s/paso.
 EST_STEPS = TARGET_TRAIN_TOKENS // TOKENS_PER_STEP
 
 if FAST_MODE:
@@ -503,16 +504,45 @@ cells.append(md("""## 7. Entrenamiento DDP — los 4 modelos, uno detrás de otr
 
 Cada `torchrun` usa **las dos T4**, el mismo `.ids`, el mismo batch global, LR, warmup y época.
 
-Entre modelos se libera VRAM. Si un job ya dejó `metrics.json` y `RESUME=True`, se reanuda (útil si Kaggle corta la sesión).
+Entre modelos se libera VRAM. Si un job ya dejó `metrics.json` y `RESUME=True`, **se salta** (útil si Kaggle corta la sesión o si el primer modelo ya terminó).
+
+> Si un run anterior se quedó colgado **después** del último `[eval]` (sin imprimir `done …`), era un deadlock NCCL: el rank 0 volvía a evaluar solo. Re-ejecuta **esta celda** (el worker se reescribe). Con `RESUME=True` no reentrena `engrama_v4`; escribe `metrics.json` y pasa al segundo modelo.
 """))
 
-cells.append(code(r"""def run_train(arch, max_steps=0):
+cells.append(code(r"""def _metrics_complete(path):
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            metrics = json.load(f)
+    except Exception:
+        return None
+    steps = int(metrics.get('steps') or 0)
+    planned = int(metrics.get('planned_steps') or 0)
+    if metrics.get('best_val_loss') is None:
+        return None
+    if planned and steps < planned:
+        return None
+    return metrics
+
+
+def run_train(arch, max_steps=0):
     out = os.path.join(SAVE_ROOT, arch)
     os.makedirs(out, exist_ok=True)
     metrics_path = os.path.join(out, 'metrics.json')
+    if RESUME:
+        cached = _metrics_complete(metrics_path)
+        if cached is not None:
+            print('SKIP %s: ya entrenado  step %s/%s  val=%.4f  ppl=%.2f' % (
+                arch, cached.get('steps'), cached.get('planned_steps'),
+                cached.get('best_val_loss') or float('nan'),
+                cached.get('best_val_ppl') or float('nan'),
+            ))
+            return cached
     cmd = [
         sys.executable, '-m', 'torch.distributed.run',
         '--standalone',
+        '--max_restarts', '0',
         '--nproc_per_node', str(NPROC),
         worker_path,
         '--arch', arch,
@@ -544,18 +574,23 @@ cells.append(code(r"""def run_train(arch, max_steps=0):
         cmd.append('--no-compile')
     if RESUME:
         cmd.append('--resume')
-    print('\n>>>', ' '.join(cmd))
+    print('\n>>>', ' '.join(cmd), flush=True)
     env = os.environ.copy()
     env['PYTHONUNBUFFERED'] = '1'
     env['TOKENIZERS_PARALLELISM'] = 'false'
+    env.setdefault('NCCL_P2P_DISABLE', '1')
+    env.setdefault('NCCL_IB_DISABLE', '1')
+    env.setdefault('TORCH_NCCL_ASYNC_ERROR_HANDLING', '1')
+    env.setdefault('TORCHINDUCTOR_FX_GRAPH_CACHE', '1')
+    env['TORCHINDUCTOR_CACHE_DIR'] = os.path.join(WORK_DIR, '.inductor_cache')
     t0 = time.time()
     proc = subprocess.run(cmd, cwd=WORK_DIR, env=env)
     elapsed = time.time() - t0
     if proc.returncode != 0:
-        print('FALLO %s  rc=%s  (%.1f min)' % (arch, proc.returncode, elapsed / 60.0))
+        print('FALLO %s  rc=%s  (%.1f min)' % (arch, proc.returncode, elapsed / 60.0), flush=True)
         return None
     if not os.path.isfile(metrics_path):
-        print('FALLO %s: no hay metrics.json' % arch)
+        print('FALLO %s: no hay metrics.json' % arch, flush=True)
         return None
     with open(metrics_path, 'r', encoding='utf-8') as f:
         metrics = json.load(f)
@@ -566,28 +601,35 @@ cells.append(code(r"""def run_train(arch, max_steps=0):
         metrics.get('best_val_ppl') or float('nan'),
         metrics.get('tokens_per_sec_steady') or 0.0,
         elapsed / 60.0,
-    ))
+    ), flush=True)
     return metrics
 
+
+# Reescribir el worker en esta celda: un re-run no depende de volver a ejecutar la celda 4.
+if 'WORKER_SRC' in globals() and 'planned_total_steps' in WORKER_SRC:
+    with open(worker_path, 'w', encoding='utf-8') as f:
+        f.write(WORKER_SRC)
+    print('Worker anti-hang escrito ->', worker_path, flush=True)
 
 all_metrics = {}
 train_started = time.time()
 MAX_STEPS = EST_STEPS if FAST_MODE else 0
 for arch in ARCHS:
-    print('\n' + '=' * 72)
-    print('ENTRENANDO', arch, cards[arch]['title'])
-    print('=' * 72)
+    print('\n' + '=' * 72, flush=True)
+    print('ENTRENANDO', arch, cards[arch]['title'], flush=True)
+    print('=' * 72, flush=True)
     try:
         met = run_train(arch, max_steps=MAX_STEPS)
         all_metrics[arch] = met
     except Exception:
         traceback.print_exc()
         all_metrics[arch] = None
+    print('Siguiente modelo...' if arch != ARCHS[-1] else 'Entrenamientos terminados.', flush=True)
     gc.collect()
     if NGPU:
         torch.cuda.empty_cache()
 
-print('\nEntrenamiento total: %.1f min' % ((time.time() - train_started) / 60.0))
+print('\nEntrenamiento total: %.1f min' % ((time.time() - train_started) / 60.0), flush=True)
 with open(os.path.join(SAVE_ROOT, 'all_metrics.json'), 'w', encoding='utf-8') as f:
     json.dump(all_metrics, f, indent=2)
 """))

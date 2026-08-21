@@ -10,6 +10,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -55,6 +56,13 @@ class TokenWindows(Dataset):
         start = index * self.window
         values = self.tokens[start : start + self.window].to(torch.int64)
         return values[:-1], values[1:]
+
+    def __getitems__(self, indices):
+        """Vectorized window gather so DataLoader workers do one index, not B."""
+        starts = torch.as_tensor(indices, dtype=torch.long).unsqueeze(1) * self.window
+        gather = starts + torch.arange(self.window, dtype=torch.long)
+        values = self.tokens[gather.reshape(-1)].to(torch.int64).view(len(indices), self.window)
+        return [(values[i, :-1], values[i, 1:]) for i in range(values.size(0))]
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +160,10 @@ class TransformerLM(nn.Module):
         )
         self.ln_f = RMSNorm(d_model)
         self.drop = nn.Dropout(dropout)
+        self._rope_len = 0
+        self._rope_key = None
+        self._cos = None
+        self._sin = None
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -171,9 +183,13 @@ class TransformerLM(nn.Module):
         if t > self.max_seq_len:
             raise ValueError(f"sequence length {t} exceeds max_seq_len={self.max_seq_len}")
         x = self.drop(self.tok_emb(input_ids))
-        cos, sin = _rope_cache(self.head_dim, t, x.device, x.dtype)
+        key = (t, x.device, x.dtype)
+        if self._rope_key != key:
+            self._cos, self._sin = _rope_cache(self.head_dim, t, x.device, x.dtype)
+            self._rope_len = t
+            self._rope_key = key
         for block in self.blocks:
-            x = block(x, cos, sin)
+            x = block(x, self._cos, self._sin)
         return self.ln_f(x)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -327,17 +343,48 @@ def arguments():
     p.add_argument("--log-every", type=int, default=50)
     p.add_argument("--eval-every", type=int, default=500)
     p.add_argument("--eval-batches", type=int, default=25)
-    p.add_argument("--linear-chunk-size", type=int, default=2048)
+    p.add_argument("--linear-chunk-size", type=int, default=8192)
     p.add_argument("--max-train-tokens", type=int, default=None)
     p.add_argument("--max-valid-tokens", type=int, default=None)
     p.add_argument("--max-steps", type=int, default=0, help="0 = full epoch(s)")
     p.add_argument("--seed", type=int, default=1234)
     p.add_argument("--no-compile", action="store_true")
-    p.add_argument("--compile-mode", default="default",
+    p.add_argument("--compile-mode", default="reduce-overhead",
                    choices=("default", "reduce-overhead", "max-autotune"))
     p.add_argument("--resume", action="store_true")
     p.add_argument("--checkpoint-loss", action="store_true")
     return p.parse_args()
+
+
+def planned_total_steps(steps_per_epoch: int, epochs: int, max_steps: int = 0) -> int:
+    """Absolute last step (not ``start_step + remaining``). Resume must not retrain."""
+    planned = int(steps_per_epoch) * int(epochs)
+    if max_steps and int(max_steps) > 0:
+        planned = min(planned, int(max_steps))
+    return planned
+
+
+def make_grad_scaler(amp: bool):
+    try:
+        return torch.amp.GradScaler(
+            "cuda", enabled=amp, init_scale=2**12, growth_interval=2000
+        )
+    except (TypeError, AttributeError):
+        return torch.cuda.amp.GradScaler(
+            enabled=amp, init_scale=2**12, growth_interval=2000
+        )
+
+
+def shutdown_loader(loader) -> None:
+    """Join DataLoader workers so torchrun can exit (persistent_workers hang otherwise)."""
+    if loader is None:
+        return
+    iterator = getattr(loader, "_iterator", None)
+    if iterator is not None and hasattr(iterator, "_shutdown_workers"):
+        try:
+            iterator._shutdown_workers()
+        except Exception:
+            pass
 
 
 def reduce_mean(value: torch.Tensor, world_size: int) -> torch.Tensor:
@@ -422,14 +469,32 @@ def main():
         use_fused_linear_loss=True,
     )
     compiled = False
+    compile_mode = args.compile_mode
     if not args.no_compile and amp:
+        os.environ.setdefault("TORCHINDUCTOR_FX_GRAPH_CACHE", "1")
         try:
-            loss_model = compile_model(loss_model, enabled=True, mode=args.compile_mode)
+            loss_model = compile_model(loss_model, enabled=True, mode=compile_mode)
             compiled = True
         except Exception as exc:
-            if ctx.is_main:
-                print(f"[compile] disabled ({type(exc).__name__}: {exc})")
-            compiled = False
+            if compile_mode != "default":
+                if ctx.is_main:
+                    print(
+                        f"[compile] {compile_mode} failed ({type(exc).__name__}); "
+                        "falling back to default",
+                        flush=True,
+                    )
+                try:
+                    loss_model = compile_model(loss_model, enabled=True, mode="default")
+                    compiled = True
+                    compile_mode = "default"
+                except Exception as exc2:
+                    if ctx.is_main:
+                        print(f"[compile] disabled ({type(exc2).__name__}: {exc2})", flush=True)
+                    compiled = False
+            else:
+                if ctx.is_main:
+                    print(f"[compile] disabled ({type(exc).__name__}: {exc})", flush=True)
+                compiled = False
     train_model = wrap_ddp(loss_model, ctx, static_graph=True)
 
     train_ds = TokenWindows(args.train, args.seq_len, args.max_train_tokens)
@@ -484,9 +549,7 @@ def main():
     if ctx.distributed:
         dist.barrier()
 
-    scaler = torch.cuda.amp.GradScaler(
-        enabled=amp, init_scale=2**12, growth_interval=2000
-    )
+    scaler = make_grad_scaler(amp)
     start_step, best = 0, float("inf")
     state_path = output / "trainer_state.pt"
     if args.resume and state_path.exists():
@@ -497,19 +560,24 @@ def main():
         start_step, best = int(checkpoint["step"]), float(checkpoint["best"])
 
     steps_per_epoch = len(train_loader)
-    planned = steps_per_epoch * args.epochs
-    if args.max_steps and args.max_steps > 0:
-        planned = min(planned, args.max_steps)
-    total_steps = start_step + planned
+    total_steps = planned_total_steps(steps_per_epoch, args.epochs, args.max_steps)
     tokens_per_step = args.batch_size * ctx.world_size * args.seq_len
 
     if ctx.is_main:
         print(
             f"arch={args.arch} params={card['parameters']:,} DDP={ctx.world_size} "
             f"local_batch={args.batch_size} global_batch={args.batch_size * ctx.world_size} "
-            f"seq={args.seq_len} steps={total_steps} compile={compiled} amp={amp}"
+            f"seq={args.seq_len} steps={total_steps} start_step={start_step} "
+            f"compile={compiled}/{compile_mode} amp={amp} ce_chunk={args.linear_chunk_size}",
+            flush=True,
         )
-        print(f"train_windows={len(train_ds):,} valid_windows={len(valid_ds):,}")
+        print(f"train_windows={len(train_ds):,} valid_windows={len(valid_ds):,}", flush=True)
+        if start_step >= total_steps:
+            print(
+                f"already finished {args.arch} at step {start_step}/{total_steps}; "
+                "writing metrics and exiting",
+                flush=True,
+            )
 
     def learning_rate(step: int) -> float:
         if step < args.warmup_steps:
@@ -521,17 +589,24 @@ def main():
     skipped = 0
     step, started = start_step, time.perf_counter()
     tokens_seen = 0
-    steady_time = 0.0
-    steady_steps = 0
+    steady_started = None
     peak_gb = 0.0
     last_loss = float("nan")
+    last_val = float("nan")
+    mark_cudagraph = hasattr(torch, "compiler") and hasattr(
+        torch.compiler, "cudagraph_mark_step_begin"
+    )
     train_model.train()
 
     if amp:
         torch.cuda.reset_peak_memory_stats(device)
 
     stop = False
+    if start_step >= total_steps:
+        stop = True
     for epoch in range(args.epochs):
+        if stop:
+            break
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
         for x, y in train_loader:
@@ -541,46 +616,37 @@ def main():
             lr = learning_rate(step)
             for group in optimizer.param_groups:
                 group["lr"] = lr
+            if mark_cudagraph and compiled:
+                torch.compiler.cudagraph_mark_step_begin()
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            t_step = time.perf_counter()
             with torch.autocast("cuda", dtype=torch.float16, enabled=amp):
                 loss = train_model(x, y)
-            if not torch.isfinite(loss.detach()):
-                skipped += 1
-                optimizer.zero_grad(set_to_none=True)
-                if ctx.is_main and (skipped <= 8 or skipped % 50 == 0):
-                    print(
-                        f"  [skip] step {step}: non-finite loss "
-                        f"(skipped={skipped}, scale={scaler.get_scale() if amp else 1.0:.0f})"
-                    )
-                step += 1
-                continue
-
+            # Do not .item()/isfinite the loss every step: that stalls the GPU.
+            # GradScaler already skips the Adam update on inf/NaN grads.
+            scale_before = scaler.get_scale() if amp else 1.0
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             if args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(
                     raw_model.parameters(), args.grad_clip, foreach=True
                 )
-            # GradScaler skips the Adam update on non-finite grads.
             scaler.step(optimizer)
             scaler.update()
+            if amp and scaler.get_scale() < scale_before:
+                skipped += 1
 
-            last_loss = float(loss.detach().float().item())
             step += 1
             tokens_seen += tokens_per_step
-            dt = time.perf_counter() - t_step
-            if step > start_step + 20:
-                steady_time += dt
-                steady_steps += 1
-
-            if amp and ctx.is_main:
-                peak_gb = max(peak_gb, torch.cuda.max_memory_allocated(device) / 2**30)
+            if step == start_step + 20:
+                steady_started = time.perf_counter()
 
             if step % args.log_every == 0:
                 logged = reduce_mean(loss.detach(), ctx.world_size).item()
+                last_loss = logged
+                if amp and ctx.is_main:
+                    peak_gb = max(peak_gb, torch.cuda.max_memory_allocated(device) / 2**30)
                 if ctx.is_main:
                     elapsed = time.perf_counter() - started
                     done = max(1, step - start_step)
@@ -590,11 +656,12 @@ def main():
                     extra = f" | skip {skipped}" if skipped else ""
                     print(
                         f"step {step:6d}/{total_steps} | loss {logged:.4f} | "
-                        f"lr {lr:.2e} | {sps:.3f}s/step | {tps:,.0f} tok/s{extra}"
+                        f"lr {lr:.2e} | {sps:.3f}s/step | {tps:,.0f} tok/s{extra}",
+                        flush=True,
                     )
 
             if step % args.eval_every == 0 or step == total_steps:
-                val = evaluate(
+                last_val = evaluate(
                     train_model,
                     valid_loader,
                     device,
@@ -603,10 +670,17 @@ def main():
                     ctx.world_size,
                 )
                 if ctx.is_main:
-                    ppl = math.exp(min(20.0, val)) if math.isfinite(val) else float("inf")
-                    print(f"  [eval] step {step}: val_loss={val:.4f} ppl={ppl:.2f}")
-                    if math.isfinite(val) and val < best:
-                        best = val
+                    ppl = (
+                        math.exp(min(20.0, last_val))
+                        if math.isfinite(last_val)
+                        else float("inf")
+                    )
+                    print(
+                        f"  [eval] step {step}: val_loss={last_val:.4f} ppl={ppl:.2f}",
+                        flush=True,
+                    )
+                    if math.isfinite(last_val) and last_val < best:
+                        best = last_val
                         torch.save(
                             dict(
                                 model=raw_model.state_dict(),
@@ -625,59 +699,75 @@ def main():
     elapsed = time.perf_counter() - started
     done_steps = max(1, step - start_step)
     overall_tps = (tokens_seen / elapsed) if elapsed > 0 else 0.0
-    steady_tps = (
-        (tokens_per_step * steady_steps / steady_time) if steady_time > 0 else overall_tps
-    )
-    if ctx.is_main:
-        torch.save(raw_model.state_dict(), output / "model.pt")
-        save_payload(raw_model, output, card)
-        val = evaluate(
-            train_model, valid_loader, device, amp, args.eval_batches, ctx.world_size
-        )
-        if math.isfinite(val) and val < best:
-            best = val
-        metrics = {
-            "arch": args.arch,
-            "title": card["title"],
-            "kind": card["kind"],
-            "parameters": card["parameters"],
-            "card": card,
-            "seq_len": args.seq_len,
-            "vocab_size": args.vocab_size,
-            "epochs": args.epochs,
-            "steps": step,
-            "planned_steps": total_steps,
-            "global_batch": args.batch_size * ctx.world_size,
-            "tokens_per_step": tokens_per_step,
-            "tokens_seen": tokens_seen,
-            "train_windows": len(train_ds),
-            "valid_windows": len(valid_ds),
-            "final_train_loss": last_loss,
-            "best_val_loss": best if math.isfinite(best) else None,
-            "best_val_ppl": (
-                math.exp(min(20.0, best)) if math.isfinite(best) else None
-            ),
-            "last_val_loss": val if math.isfinite(val) else None,
-            "seconds": elapsed,
-            "minutes": elapsed / 60.0,
-            "sec_per_step": elapsed / done_steps,
-            "tokens_per_sec_overall": overall_tps,
-            "tokens_per_sec_steady": steady_tps,
-            "peak_train_vram_gb": peak_gb,
-            "skipped_nonfinite": skipped,
-            "world_size": ctx.world_size,
-            "compiled": compiled,
-            "lr": args.lr,
-            "warmup_steps": args.warmup_steps,
-            "history": history,
-        }
-        with open(output / "metrics.json", "w", encoding="utf-8") as f:
-            json.dump(metrics, f, indent=2)
-        print(
-            f"done {args.arch} in {elapsed/60:.1f} min | best_val={best:.4f} | "
-            f"steady {steady_tps:,.0f} tok/s | skip={skipped}"
-        )
-    destroy_distributed()
+    if steady_started is not None:
+        steady_elapsed = max(1e-9, time.perf_counter() - steady_started)
+        steady_tokens = max(0, tokens_seen - 20 * tokens_per_step)
+        steady_tps = steady_tokens / steady_elapsed
+    else:
+        steady_tps = overall_tps
+    try:
+        # evaluate() all_reduces: every rank must enter or none must.
+        # Reuse the in-loop eval at total_steps so rank 0 does not wait alone.
+        if not math.isfinite(last_val):
+            last_val = evaluate(
+                train_model, valid_loader, device, amp, args.eval_batches, ctx.world_size
+            )
+        val = last_val
+        if ctx.is_main:
+            torch.save(raw_model.state_dict(), output / "model.pt")
+            save_payload(raw_model, output, card)
+            if math.isfinite(val) and val < best:
+                best = val
+            metrics = {
+                "arch": args.arch,
+                "title": card["title"],
+                "kind": card["kind"],
+                "parameters": card["parameters"],
+                "card": card,
+                "seq_len": args.seq_len,
+                "vocab_size": args.vocab_size,
+                "epochs": args.epochs,
+                "steps": step,
+                "planned_steps": total_steps,
+                "global_batch": args.batch_size * ctx.world_size,
+                "tokens_per_step": tokens_per_step,
+                "tokens_seen": tokens_seen,
+                "train_windows": len(train_ds),
+                "valid_windows": len(valid_ds),
+                "final_train_loss": last_loss,
+                "best_val_loss": best if math.isfinite(best) else None,
+                "best_val_ppl": (
+                    math.exp(min(20.0, best)) if math.isfinite(best) else None
+                ),
+                "last_val_loss": val if math.isfinite(val) else None,
+                "seconds": elapsed,
+                "minutes": elapsed / 60.0,
+                "sec_per_step": elapsed / done_steps,
+                "tokens_per_sec_overall": overall_tps,
+                "tokens_per_sec_steady": steady_tps,
+                "peak_train_vram_gb": peak_gb,
+                "skipped_nonfinite": skipped,
+                "world_size": ctx.world_size,
+                "compiled": compiled,
+                "compile_mode": compile_mode,
+                "lr": args.lr,
+                "warmup_steps": args.warmup_steps,
+                "history": history,
+            }
+            with open(output / "metrics.json", "w", encoding="utf-8") as f:
+                json.dump(metrics, f, indent=2)
+            print(
+                f"done {args.arch} in {elapsed/60:.1f} min | best_val={best:.4f} | "
+                f"steady {steady_tps:,.0f} tok/s | skip={skipped}",
+                flush=True,
+            )
+            sys.stdout.flush()
+        if ctx.distributed:
+            dist.barrier()
+    finally:
+        shutdown_loader(train_loader)
+        shutdown_loader(valid_loader)
+        destroy_distributed()
 
 
 if __name__ == "__main__":

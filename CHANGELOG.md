@@ -4,7 +4,33 @@ Todos los cambios notables de ENGRAMA se documentan aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 versionado semántico (semver).
 
-## [No publicado] — 2026-08-20
+## [No publicado] — 2026-08-21
+
+### Corregido (notebook 4 modelos se colgaba tras el primero)
+
+- `kaggle/train_compare_ddp.py`: al terminar un `torchrun` el rank 0 llamaba
+  otra vez a `evaluate()` (un `all_reduce` NCCL) mientras el rank 1 ya
+  destruía el process group. En 2×T4 el job se quedaba colgado después del
+  último `[eval] step 6091` y el notebook nunca lanzaba el segundo modelo.
+  El eval final ahora es colectivo o se reutiliza el del último paso; hay
+  `barrier` antes de destruir el grupo; los DataLoader workers se cierran;
+  `RESUME` ya no suma otra época (`total_steps` es absoluto).
+- Notebook `engrama_v4_vs_ablation_transformer_2xt4.ipynb`: si ya hay
+  `metrics.json` se salta ese arch; `torchrun --max_restarts 0`; re-ejecutar
+  la celda de entrenamiento reescribe el worker (un V4 completado no se
+  reentrena).
+
+### Optimizado (utilización GPU en 2×T4, arquitectura intacta)
+
+- El paso de train hacía `.item()` y `torch.isfinite(loss)` **en cada step**:
+  sincronizaba CPU↔GPU y dejaba las T4 a ~5–10 % de FLOPs (~60k tok/s).
+  Ahora GradScaler salta inf/NaN sin leer el scalar; el tok/s se mide en el
+  log (cada 50 pasos).
+- CE lineal: si el lote cabe en `chunk_size` (8192 = 16×512) un solo GEMM
+  vocabulario, sin bucle Python de 4 kernels (rompe menos `torch.compile`).
+- `torch.compile` en modo `reduce-overhead` (CUDA graphs) con fallback a
+  `default`; caché de inductor reutilizable entre los 4 modelos.
+- DataLoader: `__getitems__` vectorizado; RoPE del transformer se cachea.
 
 ### Optimizado (flujo de entrenamiento, arquitectura intacta)
 
