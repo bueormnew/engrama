@@ -68,6 +68,11 @@ class EngramaV5Config:
     chunk_size: int = 0
     dtype: str = "float32"
 
+    # -- sub-quadratic block-sparse resonance ------------------------------
+    resonance_mode: str = "dense"   # "dense" | "block_sparse"
+    block_size: int = 128
+    top_k: int = 8
+
     def __post_init__(self) -> None:
         if self.vocab_size < 1:
             raise ValueError("vocab_size must be >= 1")
@@ -102,6 +107,12 @@ class EngramaV5Config:
             raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
         if self.chunk_size < 0:
             raise ValueError("chunk_size must be >= 0")
+        if self.resonance_mode not in ("dense", "block_sparse"):
+            raise ValueError("resonance_mode must be 'dense' or 'block_sparse'")
+        if self.block_size < 1:
+            raise ValueError("block_size must be >= 1")
+        if self.top_k < 1:
+            raise ValueError("top_k must be >= 1")
 
     @property
     def head_dim(self) -> int:

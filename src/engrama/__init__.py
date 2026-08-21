@@ -73,6 +73,7 @@ from engrama.trainer import Trainer
 
 # ENGRAMA V5 — synaptic resonance over an explicit trace (recommended).
 from engrama.v5 import (
+    BlockSparseResonance,
     EngramaV5,
     EngramaV5Config,
     ResonanceCache,
@@ -92,6 +93,7 @@ __all__ = [
     "EngramaV5",
     "EngramaV5Config",
     "SynapticResonance",
+    "BlockSparseResonance",
     "ResonanceCache",
     "V5Trainer",
     # Core architecture (V1-V4 legacy)

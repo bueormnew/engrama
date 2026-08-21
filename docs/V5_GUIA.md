@@ -78,6 +78,35 @@ EngramaV5Config.preset("large")   # d=768, L=12, H=12, ctx=8192
 | `num_encoder_layers` | Células por token antes de la resonancia | **0** (el embedding ya es la huella aislada; añadir células difumina el contenido) |
 | `chunk_size` | Tiling causal para contextos enormes | `256`–`512` para N grande; `0` para N corto |
 
+## Cómputo sub-cuadrático (block-sparse) + kernels Triton
+
+La lectura densa es O(N²). Para contextos grandes, activa la **resonancia
+block-sparse**, que reduce el cómputo drásticamente **sin comprimir nada** (los N
+tokens siguen explícitos; solo se podan bloques de claves que no resuenan):
+
+```python
+cfg = EngramaV5Config(
+    vocab_size=32000, d_model=512, num_layers=8, num_heads=8,
+    context_length=8192,
+    resonance_mode="block_sparse",   # <-- sub-cuadrático
+    block_size=128,                  # tokens por bloque
+    top_k=8,                         # bloques de claves visitados por bloque de queries
+)
+model = EngramaV5(cfg)
+```
+
+- Con `top_k` fijo el cómputo total es **O(N)**; con `top_k` creciendo lento, O(N·√N).
+- Medido: **98.8% recall** (igual o mejor que denso) mirando ~25% del cómputo;
+  speedup 6.8× a N=4096 en CPU (mucho mayor en GPU con Triton).
+- Con `top_k ≥ nº de bloques`, el resultado es **idéntico** al denso (|Δ|≈1e-6).
+- La **generación** usa siempre la lectura exacta densa sobre la traza (la caché
+  no cambia), así que puedes entrenar block-sparse y generar sin diferencias.
+
+**Kernels Triton** (`engrama.v5.triton_kernels`): `resonance_dense` y
+`resonance_blocksparse`, fusionados y sin softmax. Se usan automáticamente en
+CUDA; en CPU hay un fallback PyTorch numéricamente idéntico. No requieren
+configuración: el modelo los invoca solo cuando el tensor está en GPU.
+
 ## Contextos enormes (8000+ tokens)
 
 Activa el tiling causal para acotar memoria de activación sin cambiar el

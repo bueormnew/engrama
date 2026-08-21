@@ -31,13 +31,17 @@ License: AGPL-3.0
 from engrama.v5.config import EngramaV5Config
 from engrama.v5.model import EngramaV5
 from engrama.v5.resonance import SynapticResonance
+from engrama.v5.blocksparse import BlockSparseResonance
 from engrama.v5.cache import ResonanceCache
 from engrama.v5.trainer import V5Trainer
+from engrama.v5 import triton_kernels
 
 __all__ = [
     "EngramaV5Config",
     "EngramaV5",
     "SynapticResonance",
+    "BlockSparseResonance",
     "ResonanceCache",
     "V5Trainer",
+    "triton_kernels",
 ]

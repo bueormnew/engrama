@@ -6,6 +6,22 @@ versionado semántico (semver).
 
 ## [No publicado] — 2026-08-21
 
+### Añadido — Cómputo sub-cuadrático + kernels Triton (V5)
+
+- **Resonancia block-sparse** (`src/engrama/v5/blocksparse.py`): solución nativa
+  al cómputo cuadrático **sin comprimir**. Enruta cada bloque de queries a los
+  `top_k` bloques de claves más resonantes (por landmarks) y poda el resto —
+  posible porque la compuerta sigmoide NO está normalizada (la atención no puede
+  hacerlo). Cómputo O(N) con `top_k` fijo, O(N√N) con `top_k` creciente. Con
+  `top_k ≥ nº bloques` es idéntico al denso (|Δ|≈1e-6). Medido: **98.8% recall
+  mirando ~25% del cómputo** (igual/mejor que denso), speedup wall-clock 6.8× a
+  N=4096 en CPU (mucho mayor en GPU).
+- **Kernels Triton fusionados** (`src/engrama/v5/triton_kernels.py`):
+  `resonance_dense` y `resonance_blocksparse`, causales y **sin softmax** (no
+  necesitan max online), con fallback PyTorch numéricamente idéntico en CPU.
+- Config `resonance_mode` (`dense`|`block_sparse`), `block_size`, `top_k`.
+- Tests nuevos: equivalencia block-sparse↔denso, causalidad estricta, kernels.
+
 ### Añadido — ENGRAMA V5 (Resonancia Sináptica, sin atención, sin compresión)
 
 - **Nuevo paquete `engrama.v5`** con API profesional estilo PyTorch/Keras:

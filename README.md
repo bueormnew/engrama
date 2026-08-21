@@ -53,6 +53,20 @@ out = model.generate([1, 2, 3], max_new_tokens=50)      # caché nativa O(N)
 | Memoria de generación | comprimida | **O(N) exacta (bytes/token constante)** |
 | Invarianza causal | ✅ | ✅ (\|Δ\| < 1e-4) |
 | Sin NaN (fp16/fp32) | ✅ | ✅ |
+| Cómputo de la lectura | O(N²) | O(N²) denso **o O(N)–O(N√N) block-sparse** |
+| Kernels GPU | — | **Triton fusionado (sin softmax)** |
+
+**Cómputo sub-cuadrático sin comprimir:** la resonancia *block-sparse* enruta por
+contenido y poda bloques que no resuenan (posible porque la compuerta no está
+normalizada — la atención no puede). Medido: **98.8% recall mirando ~25% del
+cómputo**, speedup 6.8× a N=4096, idéntico al denso con `top_k` alto. Kernels
+Triton fusionados (`engrama.v5.triton_kernels`) con fallback PyTorch en CPU.
+
+```python
+cfg = EngramaV5Config(vocab_size=32000, d_model=512, num_layers=8, num_heads=8,
+                      context_length=8192, resonance_mode="block_sparse",
+                      block_size=128, top_k=8)   # cómputo ~O(N), sin compresión
+```
 
 Guía completa: [`docs/V5_GUIA.md`](docs/V5_GUIA.md).
 

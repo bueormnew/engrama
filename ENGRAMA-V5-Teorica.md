@@ -127,6 +127,47 @@ lineales (no colapsa con la longitud).
 
 ---
 
+## 4.b Cómputo sub-cuadrático nativo: resonancia block-sparse (sin comprimir)
+
+El coste del score `N×N` es cuadrático. ENGRAMA lo reduce **de forma nativa**
+explotando una propiedad que la atención NO tiene: como la compuerta
+`σ(τ⟨q,k⟩+b)` **no está normalizada** sobre posiciones, un bloque de claves que
+no resuena contribuye ≈0 y **se puede podar sin alterar el resultado**.
+
+**Mecanismo (enrutamiento por contenido + poda de bloques, NO compresión):**
+
+1. Se parte la traza explícita en bloques de `block_size` tokens.
+2. Cada bloque de claves se resume con un **landmark** = media normalizada de sus
+   claves (un índice de enrutamiento; las claves/valores individuales siguen
+   **explícitos**, nada se comprime).
+3. Cada bloque de queries se enruta a los `top_k` bloques de claves más
+   resonantes (siempre incluye su propio bloque, causal).
+4. Se calculan las compuertas exactas **solo dentro de los bloques
+   seleccionados** y se leen sus valores explícitos.
+
+**Coste:** con `top_k` fijo, cada query examina `top_k·block_size` claves — una
+**constante** → total **O(N) lineal**; con `top_k` creciendo lento, O(N·√N).
+Muy por debajo de O(N²), y **sin comprimir nada**: los N vectores k,v siguen
+explícitos en la traza. La poda es una decisión de *dónde mirar*, no de *qué
+guardar*.
+
+**Propiedad de correctitud:** con `top_k ≥ nº de bloques causales`, el resultado
+block-sparse es **idéntico** al denso (verificado: |Δ| = 9.5e-7).
+
+**Evidencia medida** (tarea KV, modelo completo, SEQ=128, 2000 pasos):
+
+| ruta | recall | cómputo relativo |
+|---|---:|---:|
+| densa O(N²) | 98.1% | 100% |
+| block-sparse (blk=16, top_k=2) | **98.8%** | ~25% |
+
+Speedup wall-clock (CPU, blk=128, top_k=4): 1.6× a N=1024, 3.6× a N=2048,
+**6.8× a N=4096** (crece con N). En GPU con el kernel Triton fusionado la
+ganancia es mucho mayor. Notablemente, la poda **también regulariza**: enfoca la
+resonancia en los bloques relevantes, igualando o superando el recall denso.
+
+---
+
 ## 5. Contextos enormes sin explotar memoria: lectura por chunks (sin softmax)
 
 Para SEQ grande (8000+), el score `N×N` se procesa por **bloques causales**:
@@ -137,6 +178,23 @@ numéricamente trivial y sin estado global. Memoria de activación O(chunk·d).
 
 Esto da el "kernel simple pero funcional y rápido" pedido: un tiling causal sin
 softmax, fusionable con `torch.compile`, y trivial de portar a Triton.
+
+---
+
+## 5.b Kernels Triton fusionados (GPU)
+
+`src/engrama/v5/triton_kernels.py` provee dos kernels fusionados, ambos **sin
+softmax** (por eso son más simples que los de atención: no necesitan el truco de
+max online / renormalización — la lectura es una suma enmascarada directa):
+
+- `resonance_dense`: lectura causal densa con compuerta sigmoide, en tiles
+  estilo FlashAttention; la matriz N×N nunca se materializa (memoria O(1) extra).
+- `resonance_blocksparse`: lectura block-sparse fusionada que solo visita los
+  `top_k` bloques enrutados por bloque de queries. Cómputo sub-cuadrático.
+
+Ambos tienen **fallback en PyTorch puro numéricamente idéntico** cuando no hay
+Triton/CUDA (p. ej. CPU), así que el mismo código corre en todas partes y los
+tests validan la equivalencia. Al no haber softmax, portar a Triton es trivial.
 
 ---
 

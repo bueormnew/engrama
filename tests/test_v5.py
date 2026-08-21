@@ -152,3 +152,72 @@ class TestResonanceMechanism:
         m = _model()
         out = m.generate([1, 2, 3], max_new_tokens=8, temperature=0.8, top_k=10)
         assert len(out) == 11
+
+
+class TestBlockSparse:
+    def test_topk_all_equals_dense(self):
+        """Block-sparse with top_k >= num_blocks must equal the dense read."""
+        from engrama.v5.blocksparse import BlockSparseResonance
+        from engrama.v5.resonance import SynapticResonance
+        torch.manual_seed(0)
+        d, H, N = 64, 4, 50
+        x = torch.randn(1, N, d)
+        bs = BlockSparseResonance(d, H, block_size=8, top_k=999,
+                                  read_norm=None, norm_type="layernorm").eval()
+        dense = SynapticResonance(d, H, read_norm=None, norm_type="layernorm").eval()
+        dense.load_state_dict({k: v for k, v in bs.state_dict().items()
+                               if k in dense.state_dict()})
+        with torch.no_grad():
+            assert (bs(x) - dense(x)).abs().max().item() < 1e-4
+
+    def test_blocksparse_causal(self):
+        from engrama.v5.blocksparse import BlockSparseResonance
+        torch.manual_seed(0)
+        bs = BlockSparseResonance(64, 4, block_size=8, top_k=4,
+                                  norm_type="layernorm").eval()
+        x = torch.randn(1, 50, 64)
+        with torch.no_grad():
+            a = bs(x)
+            x2 = x.clone()
+            x2[0, 40] += 5.0
+            b = bs(x2)
+        assert (a[0, :40] - b[0, :40]).abs().max().item() < 1e-5
+
+    def test_model_block_sparse_runs(self):
+        cfg = EngramaV5Config(vocab_size=64, d_model=64, num_layers=2, num_heads=4,
+                              context_length=128, resonance_mode="block_sparse",
+                              block_size=16, top_k=4)
+        m = EngramaV5(cfg).eval()
+        out = m.forward(torch.randint(0, 64, (2, 40)))
+        assert out.shape == (2, 40, 64) and torch.isfinite(out).all()
+
+    def test_block_sparse_generation_matches_step(self):
+        """Block-sparse training model still generates via the exact dense cache."""
+        cfg = EngramaV5Config(vocab_size=64, d_model=64, num_layers=2, num_heads=4,
+                              context_length=128, resonance_mode="block_sparse",
+                              block_size=16, top_k=4)
+        m = EngramaV5(cfg).eval()
+        out = m.generate([1, 2, 3], max_new_tokens=5, temperature=0.0)
+        assert len(out) == 8
+
+
+class TestTritonKernels:
+    def test_dense_ref_matches_module_read(self):
+        """The kernel's PyTorch fallback must match the module's dense read."""
+        from engrama.v5.triton_kernels import _dense_ref
+        from engrama.v5.resonance import SynapticResonance
+        torch.manual_seed(0)
+        d, H, N = 64, 4, 30
+        res = SynapticResonance(d, H, read_norm=None, norm_type="layernorm").eval()
+        x = torch.randn(1, N, d)
+        with torch.no_grad():
+            q, k, v = res._project(x)
+            r_ref = _dense_ref(q, k, v, res.tau(), res.gate_bias, None)
+            g = res._gate_scores(q, k)
+            mask = torch.ones(N, N).tril().bool()
+            r_internal = torch.matmul(g.masked_fill(~mask, 0.0), v)
+        assert (r_ref - r_internal).abs().max().item() < 1e-5
+
+    def test_has_triton_flag(self):
+        from engrama.v5.triton_kernels import has_triton
+        assert isinstance(has_triton(), bool)

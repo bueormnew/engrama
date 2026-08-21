@@ -20,6 +20,38 @@ crece de forma marcada en la fase tardía del entrenamiento (SEQ=256:
 62%→73%→95%→98% en pasos 1k→2k→3k→4k), señal de que aprende el mecanismo de
 direccionamiento por contenido, no memorización.
 
+## 1.b Cómputo sub-cuadrático: resonancia block-sparse (sin comprimir)
+
+Solución nativa al O(N²): enrutamiento por landmarks + poda de bloques que no
+resuenan (posible porque la compuerta NO está normalizada — la atención no puede
+hacer esto). Nada se comprime: los N tokens siguen explícitos.
+
+**Recall (modelo completo, SEQ=128, 2000 pasos, azar 6.2%):**
+
+| ruta | recall | cómputo | equivalencia |
+|---|---:|---:|---|
+| densa O(N²) | 98.1% | 100% | — |
+| block-sparse (blk=16, top_k=2) | **98.8%** | ~25% | top_k=all ⇒ \|Δ\|=9.5e-7 vs densa |
+
+**Speedup wall-clock (CPU, blk=128, top_k=4) — crece con N:**
+
+| N | densa | block-sparse | speedup |
+|---:|---:|---:|---:|
+| 512 | 28.6 ms | 30.1 ms | 0.95× |
+| 1024 | 93.7 ms | 57.9 ms | 1.62× |
+| 2048 | 433.0 ms | 121.5 ms | 3.56× |
+| 4096 | 1668.9 ms | 245.0 ms | **6.81×** |
+
+**Escalado teórico de cómputo (pares query-clave, blk=128, top_k=8):**
+
+| N | densa O(N²) | block-sparse | ratio |
+|---:|---:|---:|---:|
+| 8192 | 33.5M | 7.9M | 4.2× |
+| 16384 | 134.2M | 16.3M | 8.2× |
+| 32768 | 536.9M | 33.1M | **16.2×** |
+
+Con `top_k` fijo, `pairs/N` converge a una constante → **cómputo total O(N)**.
+
 ## 2. Garantías arquitectónicas (verificadas en `tests/test_v5.py`)
 
 | Garantía | Medición |

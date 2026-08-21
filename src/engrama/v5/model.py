@@ -20,6 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from engrama.v5.blocksparse import BlockSparseResonance
 from engrama.v5.cache import ResonanceCache
 from engrama.v5.config import EngramaV5Config
 from engrama.v5.evoker import LatentFusionEvoker
@@ -30,10 +31,18 @@ DEFAULT_BOS_TOKEN_ID = 2
 
 
 class ResonanceBlock(nn.Module):
-    """One V5 block: synaptic resonance (synapse) + Cell (transformation)."""
+    """One V5 block: synaptic resonance (synapse) + Cell (transformation).
+
+    The read is either the dense O(N^2) path or the sub-quadratic block-sparse
+    path (content routing + block pruning). Incremental generation always uses
+    the exact dense read over the explicit trace cache (a single token attends
+    the whole retained trace), so caching is unaffected by the training path.
+    """
 
     def __init__(self, cfg: EngramaV5Config):
         super().__init__()
+        self.mode = cfg.resonance_mode
+        # The exact/dense synaptic resonance also owns the incremental step path.
         self.resonance = SynapticResonance(
             d_model=cfg.d_model,
             num_heads=cfg.num_heads,
@@ -41,11 +50,33 @@ class ResonanceBlock(nn.Module):
             tau_init=cfg.tau_init,
             norm_type=cfg.norm_type,
         )
+        if self.mode == "block_sparse":
+            self.block_sparse = BlockSparseResonance(
+                d_model=cfg.d_model,
+                num_heads=cfg.num_heads,
+                block_size=cfg.block_size,
+                top_k=cfg.top_k,
+                read_norm=cfg.read_norm,
+                tau_init=cfg.tau_init,
+                norm_type=cfg.norm_type,
+            )
+            # Share the projections so dense-step and block-sparse-train agree.
+            self.block_sparse.norm = self.resonance.norm
+            self.block_sparse.wq = self.resonance.wq
+            self.block_sparse.wk = self.resonance.wk
+            self.block_sparse.wv = self.resonance.wv
+            self.block_sparse.wo = self.resonance.wo
+            self.block_sparse.tau_raw = self.resonance.tau_raw
+            self.block_sparse.gate_bias = self.resonance.gate_bias
+        else:
+            self.block_sparse = None
         self.cell = Cell(cfg.d_model, cfg.d_ff, cfg.dropout, cfg.activation, cfg.norm_type)
         self.chunk_size = cfg.chunk_size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.chunk_size and x.size(1) > self.chunk_size:
+        if self.block_sparse is not None:
+            x = self.block_sparse(x)
+        elif self.chunk_size and x.size(1) > self.chunk_size:
             x = self.resonance.forward_chunked(x, self.chunk_size)
         else:
             x = self.resonance(x)
