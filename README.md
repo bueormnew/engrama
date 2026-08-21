@@ -377,6 +377,8 @@ engrama/
 │   ├── optimization.py       # DDP, compile y AdamW fusionado
 │   └── quick.py              # Quickstart API en 3 líneas
 ├── kaggle/
+│   ├── engrama_v4_vs_ablation_transformer_2xt4.ipynb  # Comparación 2×T4: V4 vs ablaciones vs Transformer
+│   ├── train_compare_ddp.py                           # Worker DDP del notebook de comparación
 │   ├── engrama_v4_20m_tinystories_gpt2.ipynb  # Notebook oficial de entrenamiento V4
 │   └── engrama_v3_20m_tinystories_gpt2.ipynb  # Notebook V3
 ├── benchmarks/
