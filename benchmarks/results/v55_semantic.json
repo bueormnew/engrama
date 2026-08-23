@@ -1,0 +1,15 @@
+{
+  "benchmark": "v55_semantic.py",
+  "task": "aguja semantica asociativa (K=8 pares alias a_i~b_i, valor aleatorio v_i por ejemplo)",
+  "chance": 0.0625,
+  "results": {
+    "semantic_tap_ON_keys_t0": {"accuracy": 1.0, "note": "100% — resuelve la aguja asociativa nativamente"},
+    "lexical_only_semantic_OFF": {"accuracy": 0.15, "note": "~azar: b_i nunca aparece antes, sin candidato mismo-token"}
+  },
+  "config": {
+    "rt_sem_key_source": "t0", "rt_sem_query_source": "t0",
+    "d_semantic": 32, "seq_len": 160, "steps": 600, "K_pairs": 8, "n_values": 16
+  },
+  "key_finding": "Claves semanticas desde T0 (huella AISLADA pristina, Pilar 1): distinguen los pares (cada a_i es token distinto -> K_sem distinto) y vuelven separable la asociacion alias. T_last lavaba la identidad del par -> hechos a_j eran hard-negatives identicos. t0 es ademas MAS fiel al aislamiento. Bug de invariancia (empates exactos por mismo token) resuelto con redondeo SEM_TIE_DECIMALS=4 antes del argmax.",
+  "date": "2026-08-22"
+}

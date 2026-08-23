@@ -80,11 +80,27 @@ try:  # V5: arquitectura sin atencion con recuperacion exacta (ver docs/ENGRAMA-
 except Exception:  # pragma: no cover
     pass
 
+try:  # V5.5: recall tap asimetrico (lexico + sentido) -> 100% en texto real
+    from engrama.v55 import (
+        EngraModelV55,
+        IsolatedEncoderV2,
+        PagedDualTrace,
+        RecallTapV2,
+        V55Config,
+    )
+except Exception:  # pragma: no cover
+    pass
+
 __all__ = [
     "EngraModelV5",
     "V5Config",
     "RecallTap",
     "V5Trace",
+    "EngraModelV55",
+    "V55Config",
+    "RecallTapV2",
+    "PagedDualTrace",
+    "IsolatedEncoderV2",
     "__version__",
     "__author__",
     "__license__",

@@ -1,0 +1,73 @@
+{
+  "device": "cpu",
+  "threads": 1,
+  "train_dense_seq512": {
+    "seconds": 0.9066042529998413,
+    "tokens_per_sec": 2258.9790343729596
+  },
+  "train_lsh_seq512": {
+    "seconds": 1.6669809739996708,
+    "tokens_per_sec": 1228.5683111824194
+  },
+  "train_dense_seq1024": {
+    "seconds": 0.8976401774998521,
+    "tokens_per_sec": 2281.537804718347
+  },
+  "train_lsh_seq1024": {
+    "seconds": 2.059502588500436,
+    "tokens_per_sec": 994.4148705786229
+  },
+  "train_dense_seq2048": {
+    "seconds": 1.9437407649998022,
+    "tokens_per_sec": 2107.2768929659283
+  },
+  "train_lsh_seq2048": {
+    "seconds": 5.197643484999844,
+    "tokens_per_sec": 788.0494327517584
+  },
+  "gen_ctx1024": {
+    "ms_per_token": 10.20934074995239,
+    "tokens_per_sec": 97.94951745583215,
+    "speedup_vs_recompute": 15.131618856099928
+  },
+  "gen_ctx2048": {
+    "ms_per_token": 9.04685625005186,
+    "tokens_per_sec": 110.53563496095869,
+    "speedup_vs_recompute": 35.37600318322694
+  },
+  "gen_ctx4096": {
+    "ms_per_token": 9.126874749995295,
+    "tokens_per_sec": 109.56653042713394,
+    "speedup_vs_recompute": 80.37466872216514
+  },
+  "trace_bytes_per_token": [
+    1288.0,
+    1288.0,
+    1288.0,
+    1288.0
+  ],
+  "trace_slope": 0.0,
+  "forward_lsh_scaling": {
+    "ns": [
+      256,
+      512,
+      1024,
+      2048,
+      4096
+    ],
+    "seconds": [
+      0.043321390000073734,
+      0.07527449899998828,
+      0.14157831649981745,
+      0.3448406359998444,
+      0.7471399670002938
+    ],
+    "loglog_slope": 1.0412150885090994
+  },
+  "trace_total_mb": {
+    "256": 0.33,
+    "1024": 1.32,
+    "4096": 5.28,
+    "16384": 21.1
+  }
+}

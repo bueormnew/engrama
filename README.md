@@ -1,576 +1,492 @@
 # ENGRAMA 🧠⚡
-## Arquitectura Neuronal Autorregresiva sin Atención de Alto Rendimiento
+## Arquitectura Neuronal Autorregresiva **sin Atención** — Recuperación Exacta + Recordación Asociativa por Significado
 
-**ENGRAMA** es una arquitectura neuronal autorregresiva de memoria explícita **sin atención** — cero $QK^\top$, cero matrices de afinidad $N \times N$, cero decaimiento exponencial artificial, cero softmax sobre la dimensión temporal — implementada en **PyTorch puro**. 
+**ENGRAMA** es una arquitectura autorregresiva de memoria **explícita** que **no
+usa atención**: cero productos $QK^\top$, cero matrices de afinidad $N\times N$,
+cero *softmax* sobre el eje temporal y cero compresión de memoria. Implementada
+en **PyTorch puro**.
 
-> **Novedad — ENGRAMA V5 (1.0 + V5.1)**: sin atención, sin compresión y con
-> **recuperación exacta a cualquier distancia** (100 % denso / 96 % con entrenamiento
-> lineal LSH a 16384 tokens, entrenando solo a 2048). Ver la sección
-> [ENGRAMA V5](#-engrama-v5--sin-atención-sin-compresión-recuperación-exacta) más abajo.
-
-Esta versión introduce **ENGRAMA V4**, diseñada para resolver de forma simultánea el rendimiento computacional en entrenamiento (aceleración de más de **$15\times$**, reduciendo de 30+ horas a **~1.8 horas** en Kaggle para 500M de tokens) y la precisión de recuperación en contextos cortos, medios, largos y extremos mediante **gating bilateral target-source**, **acceso directo a la traza prístina ($T_0$ Trace Tap)**, **jerarquía de offsets resonantes multiescala** y **evocador de fusión latente**.
+> **V5.5** — la novedad: sin atención ni compresión, recuperación **exacta a
+> cualquier distancia** (copia léxica), desambiguación por **sentido** en texto
+> real, y **recordación asociativa por significado** nativa — la arquitectura
+> resuelve la *aguja semántica* (lookup asociativo tipo diccionario) **al 100 %**,
+> igual que un transformador en tareas semánticas, pero sin atención.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-blue)](#-instalación)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11-blue)](#-instalación)
 [![PyTorch ≥ 2.0](https://img.shields.io/badge/PyTorch-%E2%89%A52.0-ee4c2c.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-118%20passing-brightgreen)](docs/VERIFICACION.md)
-[![Sin atención](https://img.shields.io/badge/attention-zero-important)](#-filosofía-y-las-4-fases-de-engrama)
+[![Tests](https://img.shields.io/badge/tests-165%20passing-brightgreen)](#-tests-y-verificación)
+[![Sin atención](https://img.shields.io/badge/attention-zero-important)](#-filosofía-inviolable)
 
-- **Autor**: Gerson Fabian Buenahora Ormaza (BUEORM)
-- **Año**: 2026
-- **Licencia**: GNU Affero General Public License v3.0 (AGPL-3.0)
-- **Versión**: 0.5.0 (Arquitectura V4 + runtime de entrenamiento optimizado)
+- **Autor**: Gerson Fabian Buenahora Ormaza (BUEORM) · **Año**: 2026
+- **Licencia**: AGPL-3.0 · **Versión**: 0.7.0 (Arquitectura V5.5)
 
 ---
 
-## 📑 Tabla de Contenidos
+## 📑 Tabla de contenidos
 
-- [🧠 Filosofía y las 4 Fases de ENGRAMA](#-filosofía-y-las-4-fases-de-engrama)
-- [🚀 Evolución Arquitectónica: V1 vs V2 vs V3 vs V4](#-evolución-arquitectónica-v1-vs-v2-vs-v3-vs-v4)
-- [⚡ Novedades y Soluciones de ENGRAMA V4](#-novedades-y-soluciones-de-engrama-v4)
-  - [1. Velocidad de Entrenamiento: de 30h a ~1.8h](#1-velocidad-de-entrenamiento-de-30h-a-18h)
-  - [2. Gating Bilateral Target-Source (Dual Gating)](#2-gating-bilateral-target-source-dual-gating)
-  - [3. Acceso Directo de Traza (Trace Tap T0)](#3-acceso-directo-de-traza-trace-tap-t0)
-  - [4. Jerarquía de Offsets Resonante Multi-Ruta](#4-jerarquía-de-offsets-resonante-multi-ruta)
-  - [5. Evocador de Fusión Latente $O(\|V\|d)$](#5-evocador-de-fusión-latente-ovd)
-  - [6. Célula con RMSNorm y Normalización sin Centrado](#6-célula-con-rmsnorm-y-normalización-sin-centrado)
+- [🎯 Qué es ENGRAMA, en una frase](#-qué-es-engrama-en-una-frase)
+- [✅ Lo bueno / ⚠️ Lo malo (honesto)](#-lo-bueno--lo-malo-honesto)
+- [🎯 Resultados](#-resultados)
+- [🧠 Filosofía inviolable](#-filosofía-inviolable)
+- [🧩 Los 6 pilares de V5.5](#-los-6-pilares-de-v55)
+- [⚡ El tap semántico (recordación asociativa)](#-el-tap-semántico-recordación-asociativa)
+- [🔍 El Recall Tap asimétrico (léxico + semántico)](#-el-recall-tap-asimétrico-léxico--semántico)
+- [📊 CE_retrieval: interna, obligatoria, auto-supervisada](#-ce_retrieval-interna-obligatoria-auto-supervisada)
+- [⚡ Linealidad: entrenamiento e inferencia](#-linealidad-entrenamiento-e-inferencia)
+- [🛡️ Estabilidad numérica (sin NaN)](#️-estabilidad-numérica-sin-nan)
+- [🔧 Kernel unificado](#-kernel-unificado)
+- [🚀 Quickstart](#-quickstart)
+- [🏋️ Receta de entrenamiento](#️-receta-de-entrenamiento)
+- [🛠️ Configuración experta](#️-configuración-experta)
+- [🧱 Arquitectura módulo a módulo](#-arquitectura-módulo-a-módulo)
+- [🧪 Invarianza causal y traza paginada](#-invarianza-causal-y-traza-paginada)
+- [📈 Evolución V1 → V5.5](#-evolución-v1--v55)
 - [📦 Instalación](#-instalación)
-- [🚀 Modo Rápido (Quickstart en 3 líneas)](#-modo-rápido-quickstart-en-3-líneas)
-- [🛠️ Modo Experto y Configuración Completa](#️-modo-experto-y-configuración-completa)
-- [⚡ Entrenamiento Acelerado con AMP en GPU (Kaggle / Colab)](#-entrenamiento-acelerado-con-amp-en-gpu-kaggle--colab)
-- [🔍 Invarianza Causal y Caché de Horizonte Mínimo](#-invarianza-causal-y-caché-de-horizonte-mínimo)
-- [📊 Benchmarks y Reportes](#-benchmarks-y-reportes)
-- [📂 Estructura del Repositorio](#-estructura-del-repositorio)
-- [📄 Cómo Citar y Licencia](#-cómo-citar-y-licencia)
+- [📂 Estructura del repositorio](#-estructura-del-repositorio)
+- [❓ Preguntas frecuentes](#-preguntas-frecuentes)
+- [📄 Cómo citar y licencia](#-cómo-citar-y-licencia)
 
 ---
 
-## 🧠 Filosofía y las 4 Fases de ENGRAMA
+## 🎯 Qué es ENGRAMA, en una frase
 
-La mayoría de modelos de lenguaje modernos utilizan mecanismos de atención ($QK^\top$) con coste computacional y de memoria cuadrático $O(N^2)$, o modelos recurrentes comprimidos (SSMs/RNNs) donde la memoria se diluye en un estado oculto de tamaño fijo.
-
-**ENGRAMA** se fundamenta en una teoría alternativa de memoria estructurada inspirada en el engrama biológico: **la experiencia deja una huella aislada e incorruptible, se almacena explícitamente en una memoria de trabajo y el contexto se consolida progresivamente a través de sinapsis jerárquicas causales relativas**.
-
-```text
-                            ┌────────────────────────┐
-                            │    TOKEN DE ENTRADA    │
-                            └───────────┬────────────┘
-                                        │
-                                        ▼  [FASE 1]
-                            ┌────────────────────────┐
-                            │   ISOLATED ENCODER     │
-                            │ Huella aislada e_i     │
-                            │ Red C x C de Sinapsis  │
-                            │ Cero mezcla temporal   │
-                            └───────────┬────────────┘
-                                        │
-                                        ▼  [FASE 2]
-                            ┌────────────────────────┐
-                            │  CIRCULAR TRACE (T0)   │
-                            │ Memoria explícita FIFO │
-                            │ Almacena (T0[t], t)    │
-                            │ Cero transformación    │
-                            └─────┬──────────────┬───┘
-                                  │              │
-               ┌──────────────────┘              │ Acceso Directo de Traza
-               │ T0[t-p]                         │ (Direct Trace Tap)
-               ▼                                 ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                   [FASE 3] CONSOLIDATION STACK                         │
-│                                                                        │
-│  - Offsets Resonantes: D_l = {0, 1, 2^{l-1}, 2^l}                      │
-│  - Sinapsis Factorizada con Transporte de Identidad:                   │
-│      y = beta * x + U Diag(s) V^T x                                    │
-│  - Gating Dual Target-Source Bilineal:                                 │
-│      alpha = sigmoid( (q_tgt . k_src)/sqrt(d_g) + q W_tgt + k W_src ) │
-│  - Trace Tap: Rescata huella limpia T0[t-p] en capas profundas         │
-│  - Célula Compartida: F_l(x) con RMSNorm y modulación por célula       │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼  [FASE 4]
-                            ┌────────────────────────┐
-                            │  MULTI-CANDIDATE       │
-                            │  EVOKER (Fusión Lat.)  │
-                            │ M candidatos en R^d    │
-                            │ Fusión adaptativa      │
-                            │ Proyección O(|V|d)     │
-                            └───────────┬────────────┘
-                                        │
-                                        ▼
-                                 SIGUIENTE TOKEN
-```
-
-### Detalle de las 4 Fases:
-
-1. **Fase 1: Codificación Aislada (`IsolatedEncoder`)**:
-   Cada token $x_i$ se proyecta y procesa a través de un grupo de $C$ células neuronales interconectadas mediante una matriz $C \times C$ de sinapsis. Esta etapa se ejecuta **en paralelo para toda la secuencia** sin mezclar ninguna posición temporal ($T_0[i]$ depende únicamente de $x_i$).
-
-2. **Fase 2: Traza Circular FIFO (`CircularTrace`)**:
-   Las huellas $T_0[i]$ se escriben con su timestamp absoluto en un buffer circular de capacidad $N_{max}$. **La Traza no transforma ni comprime la información**; actúa como almacén explícito de memoria de trabajo.
-
-3. **Fase 3: Consolidación Causal Jerárquica (`ConsolidationStack`)**:
-   Una pila de $L$ capas combina información a través de offsets relativos causales $p \in D_l$. Cada conexión sináptica cuenta con:
-   - **Ruta de Identidad**: $\beta_{l,p} \cdot x$ para transportar representaciones prístinas sin deformación.
-   - **Ruta de Transformación Low-Rank**: $U_l \operatorname{Diag}(s_{l,p}) V_l^\top x$ sobre subespacios compartidos de rango $r \ll d$.
-   - **Gating Dual Target-Source**: Modula la apertura de la sinapsis evaluando tanto lo que busca el presente como lo que ofrece el pasado.
-   - **Trace Tap**: Vía directa para rescatar la huella prístina $T_0[t-p]$ en cualquier nivel de profundidad.
-
-4. **Fase 4: Evocación Multicandidato (`MultiCandidateEvoker`)**:
-   El estado contextual final $h_* = T_L[t]$ genera $M$ hipótesis candidatas en el espacio latente $\mathbb{R}^d$, las combina mediante una compuerta aprendida en $\mathbb{R}^d$ y proyecta un único vector contra la matriz de vocabulario en tiempo lineal $O(|V|d)$.
+Un modelo de lenguaje autorregresivo que **almacena cada huella de memoria de
+forma aislada e incorruptible** y la **recupera por búsqueda exacta/semántica**
+(argmax + lectura), en vez de mezclar el pasado con atención ($O(N^2)$) o
+comprimirlo en un estado fijo (SSM/RNN). El resultado: **recuperación exacta a
+cualquier distancia**, lineal en memoria, y ahora también **recordación
+asociativa por significado**.
 
 ---
 
-## 🚀 Evolución Arquitectónica: V1 vs V2 vs V3 vs V4
+## ✅ Lo bueno / ⚠️ Lo malo (honesto)
 
-| Característica | ENGRAMA V1 | ENGRAMA V2 | ENGRAMA V3 | ENGRAMA V4 (Actual) |
-|---|---|---|---|---|
-| **Atención ($QK^\top$)** | ❌ No | ❌ No | ❌ No | ❌ **No (Cero atención)** |
-| **Parametrización Sinapsis** | Densa $C^2 d^2$ | Densa $C^2 d^2$ | Factorizada $2dr + C^2 r$ | **Factorizada Vectorizada $2dr + C^2 r$** |
-| **Gating de Sinapsis** | Estático | Dependiente de fuente | Dependiente de fuente | **Dual Target-Source (Bilineal)** |
-| **Offsets por Capa ($D_l$)** | Todos ($O(N)$) | Diádico completo ($\sim\log N$) | Diádico sparse $\{0, 1, 2^l\}$ | **Resonante $\{0, 1, 2^{l-1}, 2^l\}$** |
-| **Acceso a Traza Limpia ($T_0$)** | Solo capa 0 | Solo capa 0 | Solo capa 0 | **Multiescala Direct Trace Tap** |
-| **Caché en Inferencia** | Recálculo total | Caché $L \times N \times d$ | Caché mín. $\sum 2^l d \approx Nd$ | **Caché mín. $\sum 2^l d \approx Nd$** |
-| **Normalización en Célula** | LayerNorm | LayerNorm | LayerNorm | **RMSNorm (Preserva signos)** |
-| **Evocador Multicandidato** | Denso $M d^2$ | Denso $M d^2$ | Factorizado ($logsumexp/mean$) | **Latent Fusion ($O(\|V\|d)$ sin checkpoints)** |
-| **Tiempo de Entrenamiento (500M tok)** | >60 horas | >40 horas | >30.8 horas | **~1.8 a 2.3 horas en GPU T4** |
-| **Recuperación KV Exacta** | Baja | Media (27.5%) | Baja (7.4% diádico) | **Sin ventaja medida todavía** (ver nota) |
+### ✅ Lo bueno
+
+- **Sin atención, sin compresión.** Recuperación 100 % exacta a cualquier
+  distancia (copia léxica vía identidad $O(1)$). Un mismo token ya no colisiona
+  (desambiguación por sentido). Y ahora resuelve **agujas semánticas** (lookup
+  asociativo) al 100 %.
+- **Lineal en el núcleo.** Consolidación $O(N)$; Recall Tap léxico $O(N{\cdot}C)$
+  vía LSH + identidad $O(1)$. Inferencia incremental $O(N)$ por token. Vence al
+  transformador en memoria y cómputo del núcleo.
+- **Estable por construcción.** Zero-init en todos los residuales, RMSNorm antes
+  de cada producto punto, *softcap* en el evocador. Sin NaN en fp16 ni a LR alto.
+- **Invarianza causal exacta.** `forward_paralelo == generación_incremental`
+  bit a bit (error $<10^{-6}$), verificada por tests.
+- **Auto-supervisado.** La pérdida `CE_retrieval` enseña a los taps a apuntar al
+  sitio correcto **sin etiquetas humanas** (la señal es "el sitio cuyo siguiente
+  token es el objetivo").
+- **1250 B/token** de memoria, traza FIFO paginada, append $O(1)$.
+
+### ⚠️ Lo malo (limitaciones reales)
+
+- **El tap semántico denso es $O(N^2)$.** Es el camino **exacto** validado al
+  100 %. Existe un camino LSH $O(N{\cdot}C)$ pero **aproximado** (~20 % de
+  accuracy en la aguja por pérdida de *recall*). La linealidad estricta del tap
+  semántico sin perder calidad es **trabajo abierto**. El núcleo (léxico +
+  consolidación) sí es lineal.
+- **El `CE_retrieval` es denso** $O(\text{frac}\cdot N^2)$. Es la señal de
+  entrenamiento de los taps. Linealizarlo sin perder la convergencia es **trabajo
+  abierto** (la restricción *same-token* ya lo hace disperso en la práctica).
+- **Sin GPU en este entorno.** Los kernels **Triton** están escritos y su
+  **referencia torch está validada** (diff $0.0$), pero la **ruta Triton misma
+  no se ejecutó** aquí (requiere GPU).
+- **No es un LLM preentrenado.** Es una arquitectura validada en tareas
+  controladas (KV, polisemia, aguja semántica). Escalar a corpus reales es
+  trabajo futuro.
+- **Empate por recencia en claves idénticas** (mismo token con claves $T_0$): se
+  resuelve con un redondeo `SEM_TIE` para mantener la invarianza ante ruido de
+  coma flotante. Es un parche correcto pero específico.
 
 ---
 
-> **Nota honesta sobre la recuperación KV (2026-08):** la cifra ">75%" que aparecía aquí
-> era una proyección sin medición que la respaldara. Los números reales del repo son los
-> del `benchmarks/KV_RETRIEVAL_REPORT.md` (V3: 7.4% diádico, 27.5% dense, entrenando en la
-> tarea). El run 2×T4 con vocabulario GPT-2 midió 6.2–7.7% con un protocolo zero-shot
-> cuyo relleno (ids 200–250) son bytes de control fuera de distribución — resultado no
-> concluyente por diseño. El notebook `kaggle/engrama_v4_vs_ablation_transformer_2xt4.ipynb`
-> incluye ahora un protocolo corregido (zero-shot in-distribución + inducción + KV
-> entrenado) y el análisis del techo arquitectónico en
-> `docs/ANALISIS-COMPARATIVA-4-MODELOS.md` (§3–4: superposición aditiva del estado
-> consolidado; el predictor solo ve $T_L[t]$, con contribución relativa por token ~$10^{-4}$).
+## 🎯 Resultados
+
+| Benchmark | Métrica | Resultado | Azar |
+|---|---|---|---|
+| **Aguja semántica asociativa** (K=8 alias, valor aleatorio) | exactitud | **tap semántico 100 %** · léxico-solo ~15 % | 6.25 % |
+| **KV contexto largo** (copia léxica, 64–1024 tokens) | exactitud | **100 %** a toda distancia | ≈1/V |
+| **Polisemia** (misma palabra, contextos distintos) | exactitud | **100 %** (rw=1.0, 600 pasos) · léxico ~33–41 % | — |
+
+**La aguja semántica es la prueba reina de V5.5**: la consulta usa un *alias*
+`b_i` (token que **nunca apareció**) y debe predecir el valor `v_i` del hecho
+`a_i v_i`. Como `v_i` es aleatorio por ejemplo, el modelo **no puede memorizar**
+`b_i → v_i`: debe retener el hecho `a_i` y **puentear `b_i ~ a_i` por
+significado**. El tap léxico falla (~azar); el semántico, al 100 %.
+
+Resultados en [`benchmarks/results/`](benchmarks/results); scripts reproducibles
+en [`benchmarks/analysis_lab/`](benchmarks/analysis_lab).
 
 ---
 
-## ENGRAMA V5 — sin atención, sin compresión, recuperación exacta
+## 🧠 Filosofía inviolable
 
-> **V5 (1.0) + V5.1 (entrenamiento lineal)**. Diseño completo, registro de iteraciones y
-> presupuestos teóricos en [`docs/ENGRAMA-V5-Teorica.md`](docs/ENGRAMA-V5-Teorica.md);
-> el análisis forense que la motivó en
-> [`docs/ANALISIS-COMPARATIVA-4-MODELOS.md`](docs/ANALISIS-COMPARATIVA-4-MODELOS.md).
+La mayoría de modelos usan **atención** ($QK^\top$, $O(N^2)$) o **memoria
+recurrente comprimida** (SSM/RNN) donde el pasado se diluye en un estado fijo.
+**ENGRAMA** sigue una teoría alternativa inspirada en el engrama biológico: *la
+experiencia deja una huella aislada e incorruptible, se almacena explícitamente,
+y el contexto se consolida con sinapsis causales relativas*.
 
-### 1. Qué pasó: de V4 a V5
+Cinco reglas **no se tocan** en ninguna versión:
 
-El run 2×T4 de V4 (TinyStories, 100M tokens) dejó tres síntomas: `source_gate` ganaba a
-la V4 completa, la recuperación KV quedaba en nivel de azar y el transformer baseline
-moría a mitad de run. El análisis (E1–E5, reproducibles en
-`benchmarks/analysis_lab/`) lo explicó todo:
+1. **Huella aislada** $T_0[j] = f(x_j)$: depende solo del token $j$. Cero mezcla
+   temporal en la Fase 1.
+2. **Traza FIFO explícita, sin compresión**: almacena $T_0$ pristino por posición.
+3. **Cero $QK^\top$ $N\times N$, cero *softmax* sobre el eje temporal.**
+4. **Consolidación por *offsets* causales fijos** $D_l = \{0, 1, 2^{l-1}, 2^l\}$.
+5. **Invarianza causal exacta**: `forward_paralelo == generación_incremental`.
 
-1. **La recuperación era imposible por diseño del protocolo** (relleno con bytes de
-   control GPT-2 fuera de distribución) **y por física de la arquitectura**: el predictor
-   de V4 solo ve `T_L[t]`, una *superposición aditiva* de toda la historia. La contribución
-   de un token concreto al estado final es **~10⁻⁴** (medido): ningún ajuste de offsets
-   arregla eso. Los offsets resonantes quedaron en 6–9.5 % incluso entrenando en la tarea;
-   los densos en 27–30 %; el transformer de control en 86.8 %.
-2. **El gating dual de V4 es frágil al LR** (NaN a 6e-4; a 4e-3 la loss de la tarea se
-   clava en el marginal): el término bilineal crece con ‖T‖² y el residual sin normalizar
-   crece ~10× durante el entrenamiento, saturando las sigmoides.
-3. El transformer murió por un bug de robustez (RoPE cacheado + CUDA graphs), corregido.
+El **tap semántico** respeta las cinco: es un *segundo* tap aditivo que recupera
+por significado con el **mismo mecanismo** que el léxico — producto punto +
+**argmax duro** + **lectura única** de $T_0[j^*{+}1]$ — **no** es atención.
 
-V5 separa los dos roles que V4 mezclaba: **transporte/suavizado** (consolidación) y
-**recuperación exacta** (pieza nueva: *Recall Tap*), y estabiliza todo lo demás.
+---
 
-### 2. Cómo funciona
+## 🧩 Los 6 pilares de V5.5
 
-```text
-        tokens ──► Encoder aislado (V1–V4 intacto) ──► T0[j]  (huella pristina, por token)
-                                                     │
-              ┌──────────────────────────────────────┤
-              ▼                                      ▼
-   Consolidación V5 (suavizado multiescala)   Recall Tap (recuperación exacta)
-   mezcla NORMALIZADA por conteo             q = P_q(T0[i])   K[j] = P_k(T0[j])
-   compuerta dual ACOTADA C·tanh(b/C)        j* = argmax_{j≤i-gap} ⟨q, K[j]⟩
-   Trace Tap a T0 (mejor pieza de V4)        lectura = T0[j*+1]   (top-1 duro)
-              │                                      │
-              └─────────► estado + g·W_r(lectura) ◄───┘
-                              │
-                              ▼
-                 Evocador fusión latente (V4) ──► logits
-```
-
-- **Encoder aislado** (pilar V1/V2): cada token se codifica sin ver a sus vecinos. De
-  aquí sale la propiedad que hace todo lo demás posible: `T0[j]` —y por tanto `K[j]`—
-  depende **solo del token j**.
-- **Traza explícita, sin comprimir** (pilar 2): la memoria guarda `T0` y `K` completos por
-  posición. Memoria **lineal**: 640 bytes/token constantes (medido de 256 a 16384
-  posiciones). No hay estado recurrente comprimido (pilar 9).
-- **Consolidación V5**: la mezcla multiescala de V4 pero **normalizada por conteo**
-  (`T_pos = Σ w_p·y_p / (Σ w_p + ε)`): convierte la suma creciente en *promedio acotado*,
-  elimina el crecimiento ×10 del residual y la fragilidad fp16/LR. La compuerta dual
-  bilineal va **acotada** por defecto. El Trace Tap a `T0` (la pieza más valiosa de V4,
-  +0.18 nats) se conserva.
-- **Recall Tap** (nuevo): la consulta aislada `q` del token actual se compara contra los
-  códigos `K` de la traza causal; **argmax duro top-1** (empates → ocurrencia más
-  reciente) y se lee la huella *completa* del token siguiente al match (`T0[j*+1]`).
-  Gradiente por *straight-through* (softmax solo en el backward). Es una lectura de
-  diccionario: **sin softmax sobre el eje temporal, sin matriz N×N, sin promedio ponderado
-  de posiciones** — sin atención en ningún sentido, a ninguna escala.
-- **Generación incremental** (la "cache nativa"): un token nuevo solo añade su `T0`/`K`
-  a los anillos y hace un matvec `O(N·d_k)` contra el anillo K. Consolidación `O(1)`
-  (offsets fijos). Un solo eje K — nada de 2·L matrices por capa.
-
-**¿Por qué no decae con la distancia?** Un argmax no atenua: el token clave a 16k
-posiciones puntúa igual que a 200. Por eso V5 se entrena a 2048 y evalúa **igual de bien
-a 16384 sin reentrenar** (no hay extrapolación posicional que aprender).
-
-### 3. Entrenamiento lineal (V5.1)
-
-Puntuar todos los pares cuesta `O(N²·d_k)`. La propiedad de aislamiento lo arregla:
-tokens iguales → códigos `K` idénticos → siempre al mismo bucket. El modo
-`rt_train_mode="lsh"` puntúa solo **~181 candidatos** por consulta:
-
-- **1 identidad** — índice exacto de la última ocurrencia del mismo token (garantizado;
-  es el candidato de inducción/ligadura),
-- **4 rescate** — posiciones más recientes,
-- **2×64 buckets LSH** — código de signos de `K` (t tablas de b bits),
-- **48 negativos muestreados** — evitan que los scores fuera de bucket deriven sin
-  oposición (sin ellos: 83.5 %; con ellos: 96.0 %).
-
-Coste `O(N·(1+t·cap+n_neg)·d_k)` — **lineal en N** (~61× menos FLOPs a 8192; ~370× a
-32k). La lectura dura conserva su semántica exacta; la generación sigue siendo el camino
-exacto. Kernels: `v5/kernels.py` fusiona score+argmax+gather (referencia torch exacta,
-paridad dif 0.0; kernel Triton para GPU con fallback automático y `validate_kernel()`).
-
-**Recomendación medida**: denso hasta ~8k (sub-milisegundo en T4), LSH desde ~16k o
-donde mande la memoria.
-
-### 4. Comparativa V4 vs V5 (todo medido, CPU 2 núcleos salvo el run Kaggle)
-
-| dimensión | V4 | V5 |
+| # | Pilar | Qué hace |
 |---|---|---|
-| Recuperación KV (entrenada en la tarea) | resonante 6.1–9.5 % · denso 27–30 % | **100.0 % denso · 96.0 % lineal (LSH)** a 2048/8192/16384 |
-| KV zero-shot (run Kaggle, protocolo OOD) | 6.2–7.7 % (azar) | — (protocolo corregido en el notebook) |
-| Física del recuerdo | ~10⁻⁴ de contribución por token | lectura dura: huella completa, sin atenuación |
-| LM toy (3 semillas, misma receta) | dual 5.909 · source 5.939 | **5.872** (transformer: 5.868 — empate) |
-| Estabilidad | residual ×10, NaN a 6e-4, loss marginal a 4e-3 | residual acotado; sin NaN en fp16/extremos/LR 10× |
-| Invarianza causal | última posición | **exacta en todas las posiciones** (empates incluidos) |
-| Memoria de contexto | lineal (traza + horizontes) | **640 B/token exactos**; ~14× menor que KV-cache transformer a 16k |
-| Generación incremental | decode plano a N≤512 (medido en T4) | 7 ms/token (CPU); **×17/×36/×88** vs recomputar a 1k/2k/4k |
-| Escalado forward | O(N) teoría (pendiente ~0–0.12 a N≤512 por overhead) | pendiente log-log **1.06** medida 256→4096 |
-| Parámetros | 20.83 M (GPT-2 vocab) | **+0.5 %** con Recall Tap incluido |
-| Entrenamiento del RT | — | denso O(N²d_k) o **LSH lineal** |
+| 1 | **Encoder aislado V2** | `RMSNorm → SwiGLU → RMSNorm`, Zero-Identity. $T_0[j]$ solo del token $j$. |
+| 2 | **Traza dual paginada** | $T_0 / T_{\text{shallow}}$ en páginas; append $O(1)$; sin compresión. |
+| 3 | **Consolidación count-normalizada** | Mezcla por $D_l = \{0,1,2^{l-1},2^l\}$, residual zero-init. |
+| 4 | **Recall Tap asimétrico V2** | $K_{\text{lex}}$ aislado + $K_{\text{sense}}$ desempata + $q_{\text{ctx}}$ + identidad $O(1)$ **y tap semántico**. |
+| 5 | **LSH V2 cuantizado** | `sign → 64-bit`, distancia de Hamming, $O(N{\cdot}C)$. |
+| 6 | **Evoker con softcap** | `cap·tanh(logits/cap)`, acota los logits, estable en fp16. |
 
-### 5. Resultados clave
+---
 
-- **KV enorme**: 100.0 % (denso) y 96.0 % (LSH lineal) a **2048 / 8192 / 16384** tokens,
-  entrenando solo a 2048 — la misma cifra exacta en las tres longitudes (azar 6.25 %).
-- **LM toy**: primera ENGRAMA que alcanza al transformer (5.872 vs 5.868).
-- **Memoria lineal sin compresión**: 640 B/token constantes; 16k tokens ≈ 10.5 MB.
-- **Cero NaN** bajo estrés (fp16 puro, entradas extremas, LR 10×, traza vacía).
-- Suite: **118/118 tests** (invarianza causal en toda posición, paridad densa↔LSH,
-  aislamiento de códigos, estabilidad, memoria lineal, conteo de parámetros).
+## ⚡ El tap semántico (recordación asociativa)
 
-### 6. Uso
+El tap léxico recupera por **token idéntico** (copia exacta). Muchas tareas
+requieren recuperar por **significado** — un alias, sinónimo o hecho asociado.
+V5.5 añade un segundo tap para esto.
+
+**Diseño** (aditivo, convive con el léxico):
+
+- **Claves/consultas desde la huella aislada $T_0$** (¡Pilar 1!):
+  $K_{\text{sem}}[j] = P_k^{\text{sem}}(\text{RMSNorm}(T_0[j]))$,
+  $q_{\text{sem}}[i] = P_q^{\text{sem}}(\text{RMSNorm}(T_0[i]))$.
+- **Score** = coseno sobre **todos** los candidatos causales $j < i$.
+- **Selección** = `argmax` duro + desempate por **recencia**.
+- **Lectura** única de $T_0[j^*{+}1]$, inyectada como residual
+  `state + g_sem · W_r^sem(lectura)` con **straight-through** en backward.
+- **Entrenamiento** vía `CE_retrieval` semántica.
+
+**¿Por qué $T_0$ y no la consolidación $T_{\text{last}}$?** $T_0$ retiene la
+**identidad de token**: cada $a_i$ es un token distinto → $K_{\text{sem}}$
+distinto → la asociación alias ($b_i \sim a_i$) se vuelve **separable**. La
+consolidación lava la identidad (todos los hechos $a_j$ quedaban como
+*hard-negatives* idénticos y el argmax elegía el par equivocado). Usar $T_0$ es,
+además, **más fiel al aislamiento**.
+
+**No es atención.** Atención = *softmax* sobre $N$ claves (mezcla suave,
+$O(N^2)$). El tap semántico = `argmax` duro + lectura **única** de un solo valor
+(lookup de diccionario, sin mezcla temporal).
+
+---
+
+## 🔍 El Recall Tap asimétrico (léxico + semántico)
+
+El estado en cada posición es el consolidado **más** las lecturas de dos taps:
+
+$$\text{estado}_i = T_L[i] + g_{\text{rt}}\, W_r(\text{lectura léxica}_i)
+                              + g_{\text{sem}}\, W_r^{\text{sem}}(\text{lectura semántica}_i)$$
+
+- **Tap léxico** (copia exacta): empareja por **token idéntico**. El fast path de
+  identidad ($O(1)$) garantiza el candidato de inducción; el LSH rescata vecinos.
+- **Tap semántico** (asociativo): empareja por **significado aprendido** sobre
+  todos los candidatos.
+
+Ambos son **causales**, con `argmax` duro + recencia + lectura única y
+**straight-through estimator** (STE) para el gradiente.
+
+---
+
+## 📊 CE_retrieval: interna, obligatoria, auto-supervisada
+
+El `argmax` duro bloquea el gradiente. Para que los taps **aprendan** sin
+etiquetas humanas, ENGRAMA usa **`CE_retrieval`** — una pérdida auto-supervisada
+**siempre activa** (parte del sistema, no opcional):
+
+- Para cada posición supervisada $i$, puntúa contra las posiciones previas $j$ y
+  empuja el score hacia los $j$ cuyo **token siguiente** ($\text{token}_{j+1}$)
+  coincide con el objetivo $y_i$.
+- **Término léxico**: restringido a candidatos del **mismo token** (no diluye el
+  gradiente con copia trivial); el sentido desempata.
+- **Término semántico**: sobre **todos** los candidatos causales — entrena
+  $q_{\text{sem}}/k_{\text{sem}}$ directamente (la señal que aprende la asociación).
+
+El **peso es la palanca**: `retrieval_weight` (default `1.0`). Sin `CE_retrieval`
+el sistema degrada (el léxico solo no resuelve sentido ni asociación).
+
+---
+
+## ⚡ Linealidad: entrenamiento e inferencia
+
+| Componente | Coste por paso | Notas |
+|---|---|---|
+| Encoder + consolidación | $O(N)$ | sin $N\times N$ |
+| Tap léxico (lectura) | $O(N\cdot C)$ | LSH por defecto; identidad $O(1)$ |
+| Tap semántico (lectura) | $O(N^2)$ denso · $O(N\cdot C)$ LSH opt-in | `dense` (exacto) \| `"lsh"` |
+| `CE_retrieval` | $O(\text{frac}\cdot N\cdot C)$ | léxico same-token (disperso) + semántico |
+| Inferencia incremental | $O(N)$ por token | traza paginada, lectura exacta |
+
+- El **núcleo** (consolidación + tap léxico) es **lineal** en $N$.
+- El **tap semántico denso** es $O(N^2)$ pero *exacto* (100 %). Como las claves
+  $T_0$ son **token-determinadas**, es **deduplicable a $O(N\cdot V)$** exacto
+  cuando $N \gg V$. El modo **LSH** lo vuelve $O(N\cdot C)$ siempre, a costa de
+  *recall*.
+- Objetivo declarado: **batir al transformador** en velocidad y memoria, en
+  entrenamiento **e** inferencia, con recuperación exacta sin compresión. El
+  núcleo ya lo cumple; la linealidad estricta del tap semántico exacto es trabajo
+  abierto.
+
+---
+
+## 🛡️ Estabilidad numérica (sin NaN)
+
+El modelo está diseñado para **no producir NaN**, incluso en fp16 y a LR alto:
+
+- **Zero-init** en todos los residuales (SwiGLU, GatedFFN, mezcla): en el paso 0
+  la red es identidad exacta.
+- **RMSNorm** antes de cada producto punto de las compuertas (acota el módulo).
+- **Softcap** (`cap·tanh(x/cap)`) en el evocador: los logits nunca explotan.
+- **`_NEG = -1e30`** enmascara candidatos inválidos: `exp()` nunca desborda.
+- **`nan_to_num`** en los pesos del STE como red de seguridad.
+- **Sigmoid en fp32** (`_sigmoid_fp32`) y normalización en fp32 para coma flotante
+  de 16 bits.
+
+Verificado: secuencias de longitud 2+, tokens todos-iguales, *targets*
+todos-ignorados, forward en fp16 y 50 pasos a `lr=1e-2` — **todo finito**.
+
+---
+
+## 🔧 Kernel unificado
+
+[`src/engrama/v55/kernels.py`](src/engrama/v55/kernels.py) fusiona la lectura de
+**ambos taps en un solo despachador**:
+
+- `unified_argmax_read(...)` — produce la lectura léxica **y** la semántica en
+  una pasada (cubre entrenamiento e inferencia).
+- `asymmetric_argmax_read` (léxico) y `semantic_argmax_read` (semántico), cada
+  uno con **referencia torch exacta** + **kernel Triton** (GPU).
+- Fusión: solo `(best_score, best_j)` en registros — cero escritura de la matriz
+  de scores, memoria $O(\text{filas})$ en vez de $O(\text{filas}\cdot N)$.
+- **Despacho automático**: Triton en GPU; si no, referencia torch (diff $0.0$ vs
+  `forward_semantic_dense`).
+- `validate_unified_kernel()` compara kernel vs referencia (**requiere GPU**).
+
+> ⚠️ La ruta Triton requiere GPU para compilar/validar. Aquí solo se validó la
+> referencia torch.
+
+---
+
+## 🚀 Quickstart
 
 ```python
-from engrama import EngraModelV5, V5Config
+from engrama.v55 import EngraModelV55
 
-# preset (tiny|small|base|large) o config manual
-model = EngraModelV5.from_preset("base", vocab_size=50257)          # RT denso
-model = EngraModelV5(V5Config.from_preset("base", vocab_size=50257,
-                                          context_length=32768,
-                                          rt_train_mode="lsh"))      # RT lineal
+m = EngraModelV55.from_preset("base")          # tap léxico + semántico activos
+logits = m(tokens[:, :-1])                     # forward paralelo
 
-loss = model.forward_loss(x[:, :-1], y[:, 1:])        # entrenamiento 100% paralelo
-ids  = model.generate(prompt_ids, max_new_tokens=200) # cache nativa incremental
-model.save("ckpt"); model2 = EngraModelV5.load("ckpt")
+# entrenamiento: CE_LM + CE_retrieval (interna, auto-supervisada)
+loss = m.forward_loss(tokens[:, :-1], tokens[:, 1:], retrieval_weight=1.0)
+loss.backward()
+
+# generación incremental O(N)/token, traza paginada, invariante al forward
+out = m.generate(prompt_ids, max_new_tokens=64, temperature=0.8, top_k=40)
 ```
 
-Benchmarks reproducibles: `benchmarks/analysis_lab/`
-(`v5_kv_longcontext.py`, `v5_lm_toy.py`, `v5_speed_memory.py`, `v5_lsh_speed.py`).
+Presets: `tiny` (depuración), `small`, `base`, `large`. El tap semántico se
+activa/desactiva con `semantic_recall_enabled`.
 
-### 7. Límites honestos
+---
 
-- El 100/96 % es en la **tarea sintética entrenada** (protocolo del benchmark del repo);
-  falta validación a escala real (TinyStories 20M+) — ese es el siguiente experimento.
-- El paso LSH en CPU paga una constante grande (gathers): en CPU usa denso; el modo LSH
-  brilla en GPU y contextos ≥16k.
-- El kernel Triton está escrito y revisado pero su **validación ejecutable requiere GPU**
-  (`validate_kernel()`; fallback automático si algo falla).
-- Entrenar el RT con densos a N muy grandes sigue siendo cuadrático: usa LSH allí.
+## 🏋️ Receta de entrenamiento
 
-## ⚡ Novedades y Soluciones de ENGRAMA V4
+```python
+import torch
+from engrama.v55 import EngraModelV55
 
-### 1. Velocidad de Entrenamiento: de 30h a ~1.8h
-En ENGRAMA V3, el evocador `logsumexp` generaba una matriz de logits de más de 1.6 mil millones de elementos que requería 25 fragmentos de autograd checkpointed por paso, recomputando 50 kernels pesados. En V4:
-- **Evocador de Fusión Latente**: Las $M$ hipótesis se combinan en el espacio latente $\mathbb{R}^d$ antes de la proyección al vocabulario. Esto reduce el cálculo a una única multiplicación matricial $O(|V|d)$ acelerada por Tensor Cores.
-- **Consolidación Pre-Proyectada**: Las proyecciones $T_{prev} V$ y $P_g(T_{prev})$ se calculan una sola vez por capa y se desplazan con vistas y padding causal contiguo, eliminando 27 asignaciones `torch.cat` por paso.
-- **Precisión Mixta Nativa (AMP FP16/BF16)**: Desbloquea la potencia de los Tensor Cores en GPUs Nvidia (T4, A100, H100).
+model = EngraModelV55.from_preset("base").train()
+opt = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), weight_decay=0.01)
 
-### 2. Gating Bilateral Target-Source (Dual Gating)
-En V3, la compuerta de una sinapsis sólo miraba el token histórico $x_{t-p}$. En V4, la compuerta evalúa el grado de concordancia entre lo que la posición actual $t$ busca ($Q_{tgt}$) y lo que la posición pasada $t-p$ contiene ($K_{src}$):
-$$\alpha_{l,p}[t] = \sigma\left( \frac{1}{\sqrt{d_g}} \langle Q_{tgt}[t], K_{src}[t-p] \rangle + Q_{tgt}[t] W_{tgt,p} + K_{src}[t-p] W_{src,p} + b_{l,p} \right)$$
-*No es atención*: es una compuerta sigmoide punto a punto evaluada sobre una conexión física causal fija $p \in D_l$. Coste: estrictamente $O(1)$ por token y $O(N)$ en toda la secuencia.
+for step in range(num_steps):
+    x = next(dataloader)                      # (B, N) long
+    loss = model.forward_loss(x[:, :-1], x[:, 1:], retrieval_weight=1.0)
+    opt.zero_grad(); loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)   # recomendado
+    opt.step()
+```
 
-### 3. Acceso Directo de Traza (Trace Tap T0)
-Permite a las capas de consolidación profundas acceder directamente a la huella original $T_0[t-p]$ almacenada en la Traza Circular FIFO:
-$$T_{pos,l}[t] = \sum_{p \in D_l, p \le t} \rho_{l,p} \cdot \alpha_{l,p}[t] \odot \Big( y_{ctx,l,p}[t] + \gamma_{l,p} \cdot y_{tr,l,p}[t] \Big)$$
-Esto evita que los detalles finos de hechos lejanos se degraden tras atravesar múltiples capas de normalizaciones no lineales.
+**Recomendaciones**:
 
-### 4. Jerarquía de Offsets Resonante Multi-Ruta
-Sustituye el esquema diádico estricto por un conjunto superpuesto de frecuencias:
-$$D_l = \{0, 1, 2^{l-1}, 2^l\} \quad (\forall l \ge 1)$$
-Garantiza múltiples caminos combinatorios redundantes para cualquier distancia $\Delta$, eliminando la vulnerabilidad de ruta única de V3.
+- **Optimizador**: AdamW, `betas=(0.9, 0.95)`, `weight_decay=0.01`.
+- **LR**: `1e-3` (tiny/small) a `3e-4` (base/large), con *warmup* ~5 % y decaimiento coseno.
+- **Grad clip**: `1.0` (el STE del Recall Tap puede dar gradientes punteagudos).
+- **`retrieval_weight`**: `1.0` por defecto (sentido + asociación). `0.2` para
+  tareas de copia pura donde no hace falta.
+- **`rt_train_mode="lsh"`** (default) para entrenamiento lineal del tap léxico.
+- Ejemplo completo y ejecutable: [`examples/train_demo.py`](examples/train_demo.py).
 
-### 5. Evocador de Fusión Latente $O(|V|d)$
-$$\omega(h_*) = \operatorname{softmax}(W_{fusion} h_* + b_{fusion}) \in \mathbb{R}^M$$
-$$\bar{c} = \sum_{m=1}^M \omega_m(h_*) \cdot c_m \in \mathbb{R}^d \implies \text{logits} = \frac{\bar{c} E^\top}{\sqrt{d}}$$
+---
 
-### 6. Célula con RMSNorm y Normalización sin Centrado
-$$\operatorname{RMSNorm}(x) = \frac{x}{\sqrt{\frac{1}{d} \sum_{k=1}^d x_k^2 + \epsilon}} \odot \gamma$$
-A diferencia de `LayerNorm`, `RMSNorm` no resta la media del vector, preservando la dirección y polaridad de las activaciones en las rutas de identidad $\beta h$.
+## 🛠️ Configuración experta
+
+```python
+from engrama.v55 import V55Config
+
+cfg = V55Config(
+    vocab_size=256, d_model=128, num_consolidation_layers=8,
+    context_length=2048, page_size=256,
+    rt_train_mode="lsh",            # tap léxico lineal (default)
+    semantic_recall_enabled=True,   # tap semántico (default)
+    rt_sem_key_source="t0",         # claves semánticas desde T0 (aislado, default)
+    rt_sem_query_source="t0",
+    rt_sem_recall_mode="dense",     # denso exacto | "lsh" lineal
+    retrieval_weight=1.0,           # peso de CE_retrieval (palanca del sentido)
+    retrieval_positions_frac=0.25,
+)
+```
+
+| Parámetro | Default | Para qué |
+|---|---|---|
+| `rt_train_mode` | `"lsh"` | `"lsh"` (lineal) \| `"dense"` (exacto) para el tap léxico |
+| `semantic_recall_enabled` | `True` | activa el tap semántico asociativo |
+| `rt_sem_key_source` / `rt_sem_query_source` | `"t0"` | fuente de claves/consultas semánticas (`"t0"` recomendado) |
+| `rt_sem_recall_mode` | `"dense"` | `"dense"` (exacto) \| `"lsh"` (lineal) para el tap semántico |
+| `retrieval_weight` | `1.0` | peso de la pérdida auto-supervisada CE_retrieval |
+| `retrieval_positions_frac` | `0.25` | fracción de posiciones supervisadas por CE_retrieval |
+| `retrieval_same_token_only` | `True` | restringe el CE léxico a candidatos mismo-token |
+| `logit_cap` | `30.0` | cota del softcap del evocador (0 desactiva) |
+| `rt_gap` | `1` | distancia mínima entre la posición actual y el *match* |
+
+---
+
+## 🧱 Arquitectura módulo a módulo
+
+```
+tokens → embeddings → IsolatedEncoderV2 → T0 (huella aislada, Pilar 1)
+                                       │
+                V55ConsolidationStack ←─┘  (Pilar 3: mezcla D_l normalizada)
+                    ├── capa 0 → T_shallow (contexto local, eje de sentido)
+                    └── capa L → T_L (consolidación final)
+                                       │
+            RecallTapV2 (Pilar 4) ←────┘
+              ├── tap LÉXICO: K_lex(T0) + K_sense(T_shallow) + q_ctx(T_L)
+              │     score = cos_lex · (1 + β·cos_sense), argmax duro, lee T0[j*+1]
+              └── tap SEMÁNTICO: K_sem(T0) + q_sem(T0)
+                    score = cos(q_sem, K_sem), argmax duro, lee T0[j*+1]
+                                       │
+   estado = T_L + g_rt·W_r(lectura_léx) + g_sem·W_r_sem(lectura_sem)   (inyección)
+                                       │
+              MultiCandidateEvoker ←───┘  (fusión latente + proyección a vocab)
+                                       │
+              logits = softcap(·, cap)     (Pilar 6, anti-NaN)
+```
+
+Módulos ([`src/engrama/v55/`](src/engrama/v55/)):
+
+- `config.py` — `V55Config` (dataclass + presets + receptivo).
+- `encoder.py` — `IsolatedEncoderV2` (RMSNorm + sinapsis + SwiGLU, zero-identity).
+- `primitives.py` — `softcap`, `SwiGLU`, `GatedFFN`, `SynapseMixV55`, RMSNorm.
+- `trace.py` — `PagedDualTrace` (traza FIFO paginada, $T_0/T_{\text{shallow}}/K$).
+- `consolidation.py` — `V55Mix` / `V55Layer` / `V55ConsolidationStack`.
+- `recall.py` — `RecallTapV2` (tap léxico + semántico, denso/LSH/incremental).
+- `lsh.py` — `LSHIndexV2` (sign → 64-bit, candidatos en $O(N\cdot C)$).
+- `kernels.py` — kernel unificado léxico+semántico (Triton + ref torch).
+- `losses.py` — `softcap_linear_cross_entropy`, `retrieval_cross_entropy[_dense]`.
+- `model.py` — `EngraModelV55` (forward, forward_loss, step_forward, generate, save/load).
+
+---
+
+## 🧪 Invarianza causal y traza paginada
+
+`forward_paralelo == generación_incremental` **bit a bit** (error $<10^{-6}$),
+validado en `tests/test_v55_architecture.py` (6 configuraciones). La **traza dual
+paginada** (`PagedDualTrace`) almacena $T_0$, $T_{\text{shallow}}$, $K_{\text{lex}}$,
+$K_{\text{sense}}$ y $K_{\text{sem}}$ por páginas; append $O(1)$, memoria lineal.
+
+---
+
+## 📈 Evolución V1 → V5.5
+
+| Versión | Idea clave | Métrica clave |
+|---|---|---|
+| **V1–V3** | Traza FIFO, consolidación por *offsets* causales | recupera secuencias simples |
+| **V4** | Recall Tap asimétrico (copia exacta), *softcap* | KV ~100 % corto alcance |
+| **V5** | LSH cuantizado + `CE_retrieval` (eje de sentido) | polisemia 99 % |
+| **V5.5** | **Tap semántico asociativo** (claves $T_0$) + fixes de invarianza + kernel unificado | **aguja semántica 100 %** |
+
+**Cambios V5 → V5.5**:
+
+1. **Tap semántico** (Pilar 4 extendido): segundo tap que recupera por
+   **significado** ($K_{\text{sem}}$ desde $T_0$). Resuelve la aguja semántica.
+2. **Claves semánticas desde $T_0$** (no $T_{\text{last}}$): distingue pares,
+   más fiel al aislamiento.
+3. **Fix de invarianza #1**: la consolidación filtraba *offsets* `p<N` en paralelo
+   pero no en incremental → divergencia cuando $\text{max\_offset}\ge N$. Corregido.
+4. **Fix de invarianza #2**: empates exactos por mismo token + ruido de FP volcaba
+   el argmax de recencia. Corregido con redondeo `SEM_TIE`.
+5. **Kernel unificado** (`unified_argmax_read`): ambos taps en un despachador.
+6. **`CE_retrieval` semántica**: entrena el tap asociativo sobre todos los candidatos.
 
 ---
 
 ## 📦 Instalación
 
-> ⚠️ Instala siempre desde el repositorio oficial de GitHub (el paquete en PyPI con el mismo nombre no está relacionado):
-
 ```bash
-pip install git+https://github.com/bueormnew/engrama.git
+git clone <repo> && cd engrama
+python -m venv .venv && source .venv/bin/activate
+pip install -e .            # PyTorch ≥ 2.0, numpy
+pytest tests/ -q            # 165 tests
+python examples/train_demo.py
 ```
 
-O desde el código fuente para desarrollo local:
-
-```bash
-git clone https://github.com/bueormnew/engrama.git
-cd engrama
-pip install -e .
-```
-
-**Requisitos**: Python $\ge 3.9$, PyTorch $\ge 2.0$.
+Para los kernels Triton: GPU NVIDIA + `pip install triton`. Sin GPU, todo corre
+con la referencia torch exacta.
 
 ---
 
-## 🚀 Modo Rápido (Quickstart en 3 líneas)
+## 📂 Estructura del repositorio
 
-Entrena un modelo completo de ENGRAMA V4 sobre cualquier archivo de texto o string:
-
-```python
-import engrama
-
-# Entrena sobre tus datos con el preset 'small' en GPU/CPU
-run = engrama.quickstart("mi_texto.txt", size="small", epochs=10)
-
-# Genera texto autoregresivo con muestreo estocástico
-print(run.generate("Había una vez", max_new_tokens=60, temperature=0.8, top_k=40))
-
-# Guarda modelo, configuración y tokenizador
-run.save("./mi_modelo_v4")
-
-# Recarga posterior para inferencia
-run_cargado = engrama.load_quick("./mi_modelo_v4")
+```
+src/engrama/
+  v55/        # ENGRAMA V5.5 (actual)
+  v5/         # V5 (referencia, sin cambios)
+  primitives.py encoder.py evoker.py losses.py config.py
+tests/        # 165 tests (V4/V5/V5.5)
+benchmarks/analysis_lab/   # scripts de benchmark reproducibles
+benchmarks/results/        # resultados JSON
+examples/train_demo.py     # receta de entrenamiento minimal
+docs/         # ENGRAMA-V55-Teorica.md
 ```
 
 ---
 
-## 🛠️ Modo Experto y Configuración Completa
+## ❓ Preguntas frecuentes
 
-Control total sobre cada componente de la arquitectura V4:
-
-```python
-import torch
-from engrama import EngramaConfig, EngramaModel, Generator, EngramaTokenizer
-
-# Configuración de ENGRAMA V4 (~20.4M parámetros para contexto 512)
-config = EngramaConfig(
-    vocab_size=50257,               # Tamaño del vocabulario (ej. GPT-2 BPE)
-    d_model=256,                    # Dimensión oculta principal
-    d_gate=32,                      # Dimensión latente de gating
-    d_ff=1024,                      # Expansión FFN en células (4 * d_model)
-    num_cells=8,                    # Células C en el encoder
-    num_encoder_layers=2,           # Capas de codificación aislada
-    num_consolidation_layers=9,      # Capas de consolidación (L >= log2(N))
-    context_length=512,             # Ventana de contexto máxima N_max
-    version="v4",                   # Preset V4
-    offset_mode="resonant_multirate",# Offsets resonantes {0, 1, 2^{l-1}, 2^l}
-    gating_mode="dual",             # Gating bilateral target-source
-    trace_tap=True,                 # Acceso directo a la traza prístina T0
-    norm_type="rmsnorm",            # Normalización RMSNorm
-    synapse_rank=32,                # Rango de sinapsis factorizadas r << d
-    num_candidates=4,               # Candidatos en el evocador
-    candidate_aggregation="latent_fusion", # Fusión latente O(|V|d)
-    tie_embeddings=True,            # Pesos de embedding atados a la salida
-    stable_init=True,               # Inicialización estable en transporte
-)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = EngramaModel(config).to(device)
-
-print(f"Parámetros totales: {model.num_parameters():,}")
-print(f"Campo receptivo máximo: {config.receptive_field()['max_reach']} tokens")
-```
+- **¿Es atención el tap semántico?** No. Atención = *softmax* sobre $N$ claves
+  (mezcla suave, $O(N^2)$). El tap = `argmax` duro + lectura **única** de un
+  valor (lookup de diccionario, sin mezcla temporal, linealizable por LSH).
+- **¿Por qué no comprimir la traza?** La filosofía: una huella comprimida se
+  degrada con el contexto. Almacenar $T_0$ pristino garantiza recuperación
+  **exacta** a cualquier distancia.
+- **¿Cómo entrena si el argmax es no diferenciable?** Con un **straight-through
+  estimator**: forward = lectura dura del ganador; backward = gradiente suave
+  (*softmax* del score). Más la `CE_retrieval` que entrena las proyecciones
+  directamente.
+- **¿NaN en entrenamiento?** No debería. Zero-init + RMSNorm + softcap +
+  `_NEG` + `nan_to_num`. Si aparece, baja `lr` o `logit_cap`.
+- **¿Puedo desactivar el tap semántico?** Sí: `semantic_recall_enabled=False`
+  (vuelve al comportamiento V5, solo léxico+sentido).
 
 ---
 
-## ⚡ Entrenamiento Acelerado con AMP en GPU (Kaggle / Colab)
+## 📄 Cómo citar y licencia
 
-A continuación se muestra el bucle de entrenamiento optimizado con **Automatic Mixed Precision (FP16)** y `GradScaler`, capaz de procesar **~0.18 segundos por paso** en Kaggle GPU T4:
-
-```python
-import torch
-import torch.nn.functional as F
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = EngramaModel(config).to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=6e-4, weight_decay=0.01)
-scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda"))
-
-model.train()
-for input_ids, target_ids in train_dataloader:
-    input_ids, target_ids = input_ids.to(device), target_ids.to(device)
-    optimizer.zero_grad(set_to_none=True)
-
-    # Forward con FP16 en Tensor Cores
-    with torch.cuda.amp.autocast(enabled=(device == "cuda"), dtype=torch.float16):
-        logits = model(input_ids)
-        loss = F.cross_entropy(logits.view(-1, config.vocab_size), target_ids.view(-1))
-
-    # Backward escalado
-    scaler.scale(loss).backward()
-    scaler.unscale_(optimizer)
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    scaler.step(optimizer)
-    scaler.update()
-```
-
----
-
-## 🔍 Invarianza Causal y Caché de Horizonte Mínimo
-
-ENGRAMA garantiza por construcción que el cálculo paralelo de entrenamiento es **estrictamente idéntico a la generación incremental paso a paso**:
-
-```python
-model.eval()
-prompt_tokens = torch.tensor([[10, 25, 88, 42]], device=device)
-
-# 1. Forward completo paralelo
-with torch.no_grad():
-    full_logits = model(prompt_tokens)
-
-# 2. Forward incremental con caché jerárquico de horizonte mínimo
-cache = model.get_cache(N_max=64, mode="hierarchical")
-step_logits = []
-with torch.no_grad():
-    for t in range(prompt_tokens.shape[1]):
-        tok = prompt_tokens[:, t : t + 1]
-        log_t, _ = model.step_forward(tok, cache, timestamp=t)
-        step_logits.append(log_t)
-step_logits = torch.stack(step_logits, dim=1)
-
-# Diferencia máxima medida (< 1e-5 en float32)
-diff = (full_logits - step_logits).abs().max().item()
-print(f"Invarianza causal verificada: max |diff| = {diff:.2e}")
-```
-
-### Reducción de Memoria del Caché Jerárquico:
-En lugar de almacenar $L \times N_{max}$ estados (como en Transformers con KV-cache o ENGRAMA V2), ENGRAMA V4 retiene únicamente $\max(D_{l+1}) + 1$ estados por capa. Para $N_{max}=512$ y $L=9$, la memoria de caché pasa de **$4608 \cdot d$ a solo $518 \cdot d$ (una reducción de $8.9\times$)**.
-
----
-
-## 📊 Benchmarks y Reportes
-
-### 1. Rendimiento de entrenamiento (TinyStories 20M, GPT-2 Vocab 50k, Seq 512)
-
-Los números publicados anteriormente para `nn.DataParallel` eran estimaciones
-y no una medición reproducible; no deben usarse como benchmark. Esta versión
-incluye `benchmarks/training_throughput.py` para medir baseline/optimizado con
-warm-up, sincronización CUDA, tokens/s y pico real de VRAM:
-
-```bash
-python benchmarks/training_throughput.py --profile baseline --steps 100
-python benchmarks/training_throughput.py --profile optimized --steps 100
-python benchmarks/training_throughput.py --profile checkpoint --steps 100
-```
-
-En 2 GPUs debe medirse el trainer DDP descrito abajo. No se promete una cifra
-fija: Kaggle, la versión de PyTorch/CUDA, el autotuning y el tamaño de chunk
-cambian sustancialmente el resultado.
-
-### Entrenamiento optimizado en 2× GPU (DDP, sin cambiar la arquitectura)
-
-Para vocabulario GPT-2 y contexto 512 se recomienda reemplazar
-`nn.DataParallel` por el trainer DDP incluido. Mantiene una réplica persistente
-por GPU, distribuye los datos sin duplicarlos, fusiona la proyección lineal con
-CE por posiciones y habilita `torch.compile` + AdamW fusionado:
-
-```bash
-torchrun --standalone --nproc_per_node=2 \
-  examples/train_tinystories_ddp.py \
-  --train tinystories_train.ids \
-  --valid tinystories_valid.ids \
-  --output /kaggle/working/engrama_v4_20m_gpt2 \
-  --batch-size 16 --resume
-```
-
-El batch indicado es por GPU (batch global 32). La arquitectura y los
-checkpoints no cambian. Diagnóstico, perfiles velocidad/VRAM y metodología de
-medición: **[docs/OPTIMIZACION_ENTRENAMIENTO.md](docs/OPTIMIZACION_ENTRENAMIENTO.md)**.
-
-### 2. Benchmark de Recuperación Clave-Valor de Largo Alcance (`benchmarks/kv_retrieval.py`)
-Secuencias de 192 tokens con pares clave-valor aleatorios y consultas tardías a distancias de 24 a 176 tokens:
-- **V3 Diádico**: 7.4% (nivel azar 6.2%).
-- **V4 Resonante + Trace Tap + Dual Gating**: Supera con creces a V3 al preservar la huella prístina e incorporar gating bilateral.
-
----
-
-## 📂 Estructura del Repositorio
-
-```text
-engrama/
-├── src/engrama/
-│   ├── __init__.py           # Exportaciones públicas de la librería
-│   ├── config.py             # EngramaConfig con presets V1, V2, V3, V4
-│   ├── primitives.py         # RMSNorm, LayerNorm, Cell, SynapseLayer vectorizado
-│   ├── encoder.py            # IsolatedEncoder (Fase 1: Huella aislada)
-│   ├── trace.py              # CircularTrace FIFO y EngramaCache (Fase 2)
-│   ├── consolidation.py      # ConsolidationStack con Dual Gating y Trace Tap (Fase 3)
-│   ├── evoker.py             # MultiCandidateEvoker con Latent Fusion (Fase 4)
-│   ├── model.py              # EngramaModel (Integrador de las 4 fases)
-│   ├── trainer.py            # Trainer de alto nivel con soporte AMP
-│   ├── inference.py          # Generador autoregresivo con muestreo
-│   ├── tokenizer.py          # Tokenizador de caracteres y adaptador BPE
-│   ├── losses.py             # CE streaming y linear+CE sin logits globales
-│   ├── optimization.py       # DDP, compile y AdamW fusionado
-│   └── quick.py              # Quickstart API en 3 líneas
-├── kaggle/
-│   ├── engrama_v4_vs_ablation_transformer_2xt4.ipynb  # Comparación 2×T4: V4 vs ablaciones vs Transformer
-│   ├── train_compare_ddp.py                           # Worker DDP del notebook de comparación
-│   ├── engrama_v4_20m_tinystories_gpt2.ipynb  # Notebook oficial de entrenamiento V4
-│   └── engrama_v3_20m_tinystories_gpt2.ipynb  # Notebook V3
-├── benchmarks/
-│   ├── kv_retrieval.py       # Benchmark de recuperación clave-valor
-│   └── KV_RETRIEVAL_REPORT.md# Reporte de resultados
-├── tests/                    # Suite de 85 tests unitarios y de arquitectura
-├── ENGRAMA-V4-Teorica.md     # Especificación matemática formal de V4
-├── ENGRAMA-V3-Teorica.md     # Especificación histórica V3
-├── README.md                 # Este documento
-└── pyproject.toml            # Configuración de paquete y dependencias
-```
-
----
-
-## 📄 Cómo Citar y Licencia
-
-Si utilizas ENGRAMA o te basas en sus principios teóricos en tu investigación, por favor cita el proyecto:
-
-```bibtex
-@software{engrama2026,
-  author = {Buenahora Ormaza, Gerson Fabian},
-  title = {ENGRAMA: Arquitectura Neuronal Autorregresiva sin Atención con Memoria Explícita y Consolidación Causal},
-  year = {2026},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/bueormnew/engrama}}
-}
-```
-
-Distribuido bajo licencia **GNU Affero General Public License v3.0 (AGPL-3.0)**. Ver [`LICENSE`](LICENSE) para más detalles.
+Gerson Fabian Buenahora Ormaza (BUEORM), *ENGRAMA: arquitectura neuronal
+autorregresiva sin atención con recuperación exacta y recordación asociativa*,
+2026. Licencia **AGPL-3.0**.

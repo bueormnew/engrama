@@ -1,0 +1,8 @@
+{
+  "benchmark": "v55_kv_longcontext.py (confirmacion rapida, semantico OFF)",
+  "task": "copia lexica exacta (KV) a distancia variable",
+  "config": {"d_model":64,"num_consolidation_layers":7,"rt_train_mode":"dense","steps":150,"semantic":"OFF"},
+  "results": {"distancia_64": 1.0, "distancia_256": 1.0},
+  "note": "El tap lexico (copia exacta) no cambia con las ediciones V5.5 (tap semantico aislado). 100% a distancias 64 y 256 confirmado esta sesion. La lectura dura (argmax) no decae con la distancia.",
+  "date": "2026-08-22"
+}

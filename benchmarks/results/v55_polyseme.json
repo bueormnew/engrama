@@ -1,0 +1,8 @@
+{
+  "benchmark": "v55_polyseme.py (semantico OFF; mide el tap lexico de sentido)",
+  "task": "desambiguacion por sentido (misma palabra, contextos distintos)",
+  "config": {"d_model":64,"num_consolidation_layers":7,"seq_len":512,"steps":600,"rw":1.0,"semantic":"OFF"},
+  "results": {"sentido_rw1.0_600steps": 1.0, "lexico_senseOFF_300steps": 0.33},
+  "note": "Tap lexico de sentido intacto tras las ediciones V5.5 (tap semantico aislado). 100% con sentido (beta entrenable + CE_retrieval) a 600 pasos. El control lexico (beta=0) queda ~33-41% (no puede desambiguar). beta final ~0.75.",
+  "date": "2026-08-22"
+}
