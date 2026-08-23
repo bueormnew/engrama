@@ -1,0 +1,13 @@
+{
+  "task": "polyseme_disambiguation",
+  "sense_with_aux_loss": 1.0,
+  "lexical_only": 0.41,
+  "chance": 0.5,
+  "note": "CE_retrieval INTERNA/obligatoria (densa, same-token, temp 0.1). El peso rw es la palanca: 0.3->52%, 1.0->99%, 2.0->100%. Default del sistema rw=1.0. Lexico solo (beta=0) -> 41% (azar 50%).",
+  "command": "python benchmarks/analysis_lab/v55_polyseme.py --steps 600 --rw 1.0",
+  "sense_CE_retrieval_rw2": 1.0,
+  "sense_CE_retrieval_rw0.3": 0.52,
+  "sense_CE_retrieval_rw1.0": 0.99,
+  "sense_CE_retrieval_rw2.0": 1.0,
+  "default_retrieval_weight": 1.0
+}
