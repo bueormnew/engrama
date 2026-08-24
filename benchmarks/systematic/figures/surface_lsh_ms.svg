@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" font-family="Helvetica,Arial,sans-serif" style="background:#fff">
+<text x="360.0" y="30" text-anchor="middle" font-size="17" font-weight="bold">Prueba 4 — Latencia LSH ms (superficie N x d)</text>
+<rect x="100.0" y="284.0" width="73.8" height="56.0" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="136.9" y="316.0" text-anchor="middle" font-size="11" fill="#000">20</text>
+<rect x="173.8" y="284.0" width="73.8" height="56.0" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="210.6" y="316.0" text-anchor="middle" font-size="11" fill="#000">41</text>
+<rect x="247.5" y="284.0" width="73.8" height="56.0" fill="rgb(218,61,60)" stroke="#fff" stroke-width="1"/>
+<text x="284.4" y="316.0" text-anchor="middle" font-size="11" fill="#000">74</text>
+<rect x="321.2" y="284.0" width="73.8" height="56.0" fill="rgb(216,61,60)" stroke="#fff" stroke-width="1"/>
+<text x="358.1" y="316.0" text-anchor="middle" font-size="11" fill="#000">143</text>
+<rect x="395.0" y="284.0" width="73.8" height="56.0" fill="rgb(213,64,60)" stroke="#fff" stroke-width="1"/>
+<text x="431.9" y="316.0" text-anchor="middle" font-size="11" fill="#000">309</text>
+<rect x="468.8" y="284.0" width="73.8" height="56.0" fill="rgb(206,68,59)" stroke="#fff" stroke-width="1"/>
+<text x="505.6" y="316.0" text-anchor="middle" font-size="11" fill="#000">627</text>
+<rect x="542.5" y="284.0" width="73.8" height="56.0" fill="rgb(195,75,60)" stroke="#fff" stroke-width="1"/>
+<text x="579.4" y="316.0" text-anchor="middle" font-size="11" fill="#000">1137</text>
+<rect x="616.2" y="284.0" width="73.8" height="56.0" fill="rgb(171,90,60)" stroke="#fff" stroke-width="1"/>
+<text x="653.1" y="316.0" text-anchor="middle" font-size="11" fill="#000">2240</text>
+<rect x="100.0" y="228.0" width="73.8" height="56.0" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="136.9" y="260.0" text-anchor="middle" font-size="11" fill="#000">35</text>
+<rect x="173.8" y="228.0" width="73.8" height="56.0" fill="rgb(218,60,59)" stroke="#fff" stroke-width="1"/>
+<text x="210.6" y="260.0" text-anchor="middle" font-size="11" fill="#000">68</text>
+<rect x="247.5" y="228.0" width="73.8" height="56.0" fill="rgb(217,61,60)" stroke="#fff" stroke-width="1"/>
+<text x="284.4" y="260.0" text-anchor="middle" font-size="11" fill="#000">131</text>
+<rect x="321.2" y="228.0" width="73.8" height="56.0" fill="rgb(214,63,60)" stroke="#fff" stroke-width="1"/>
+<text x="358.1" y="260.0" text-anchor="middle" font-size="11" fill="#000">261</text>
+<rect x="395.0" y="228.0" width="73.8" height="56.0" fill="rgb(208,67,60)" stroke="#fff" stroke-width="1"/>
+<text x="431.9" y="260.0" text-anchor="middle" font-size="11" fill="#000">541</text>
+<rect x="468.8" y="228.0" width="73.8" height="56.0" fill="rgb(196,74,60)" stroke="#fff" stroke-width="1"/>
+<text x="505.6" y="260.0" text-anchor="middle" font-size="11" fill="#000">1083</text>
+<rect x="542.5" y="228.0" width="73.8" height="56.0" fill="rgb(173,89,60)" stroke="#fff" stroke-width="1"/>
+<text x="579.4" y="260.0" text-anchor="middle" font-size="11" fill="#000">2151</text>
+<rect x="616.2" y="228.0" width="73.8" height="56.0" fill="rgb(129,116,60)" stroke="#fff" stroke-width="1"/>
+<text x="653.1" y="260.0" text-anchor="middle" font-size="11" fill="#000">4146</text>
+<rect x="100.0" y="172.0" width="73.8" height="56.0" fill="rgb(218,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="136.9" y="204.0" text-anchor="middle" font-size="11" fill="#000">73</text>
+<rect x="173.8" y="172.0" width="73.8" height="56.0" fill="rgb(217,61,60)" stroke="#fff" stroke-width="1"/>
+<text x="210.6" y="204.0" text-anchor="middle" font-size="11" fill="#000">126</text>
+<rect x="247.5" y="172.0" width="73.8" height="56.0" fill="rgb(214,63,60)" stroke="#fff" stroke-width="1"/>
+<text x="284.4" y="204.0" text-anchor="middle" font-size="11" fill="#000">245</text>
+<rect x="395.0" y="172.0" width="73.8" height="56.0" fill="rgb(196,74,60)" stroke="#fff" stroke-width="1"/>
+<text x="431.9" y="204.0" text-anchor="middle" font-size="11" fill="#000">1062</text>
+<rect x="468.8" y="172.0" width="73.8" height="56.0" fill="rgb(175,88,60)" stroke="#fff" stroke-width="1"/>
+<text x="505.6" y="204.0" text-anchor="middle" font-size="11" fill="#000">2065</text>
+<rect x="542.5" y="172.0" width="73.8" height="56.0" fill="rgb(129,117,60)" stroke="#fff" stroke-width="1"/>
+<text x="579.4" y="204.0" text-anchor="middle" font-size="11" fill="#000">4173</text>
+<rect x="100.0" y="116.0" width="73.8" height="56.0" fill="rgb(217,61,60)" stroke="#fff" stroke-width="1"/>
+<text x="136.9" y="148.0" text-anchor="middle" font-size="11" fill="#000">130</text>
+<rect x="173.8" y="116.0" width="73.8" height="56.0" fill="rgb(214,63,60)" stroke="#fff" stroke-width="1"/>
+<text x="210.6" y="148.0" text-anchor="middle" font-size="11" fill="#000">253</text>
+<rect x="247.5" y="116.0" width="73.8" height="56.0" fill="rgb(208,67,60)" stroke="#fff" stroke-width="1"/>
+<text x="284.4" y="148.0" text-anchor="middle" font-size="11" fill="#000">538</text>
+<rect x="395.0" y="116.0" width="73.8" height="56.0" fill="rgb(175,88,60)" stroke="#fff" stroke-width="1"/>
+<text x="431.9" y="148.0" text-anchor="middle" font-size="11" fill="#000">2058</text>
+<rect x="468.8" y="116.0" width="73.8" height="56.0" fill="rgb(130,116,60)" stroke="#fff" stroke-width="1"/>
+<text x="505.6" y="148.0" text-anchor="middle" font-size="11" fill="#000">4113</text>
+<rect x="542.5" y="116.0" width="73.8" height="56.0" fill="rgb(36,175,60)" stroke="#fff" stroke-width="1"/>
+<text x="579.4" y="148.0" text-anchor="middle" font-size="11" fill="#000">8445</text>
+<rect x="100.0" y="60.0" width="73.8" height="56.0" fill="rgb(214,63,60)" stroke="#fff" stroke-width="1"/>
+<text x="136.9" y="92.0" text-anchor="middle" font-size="11" fill="#000">262</text>
+<rect x="173.8" y="60.0" width="73.8" height="56.0" fill="rgb(208,67,60)" stroke="#fff" stroke-width="1"/>
+<text x="210.6" y="92.0" text-anchor="middle" font-size="11" fill="#000">547</text>
+<rect x="395.0" y="60.0" width="73.8" height="56.0" fill="rgb(124,120,60)" stroke="#fff" stroke-width="1"/>
+<text x="431.9" y="92.0" text-anchor="middle" font-size="11" fill="#000">4385</text>
+<rect x="468.8" y="60.0" width="73.8" height="56.0" fill="rgb(30,180,60)" stroke="#fff" stroke-width="1"/>
+<text x="505.6" y="92.0" text-anchor="middle" font-size="11" fill="#000">8746</text>
+<text x="136.9" y="360.0" text-anchor="middle" font-size="11">1K</text>
+<text x="210.6" y="360.0" text-anchor="middle" font-size="11">2K</text>
+<text x="284.4" y="360.0" text-anchor="middle" font-size="11">4K</text>
+<text x="358.1" y="360.0" text-anchor="middle" font-size="11">8K</text>
+<text x="431.9" y="360.0" text-anchor="middle" font-size="11">16K</text>
+<text x="505.6" y="360.0" text-anchor="middle" font-size="11">33K</text>
+<text x="579.4" y="360.0" text-anchor="middle" font-size="11">66K</text>
+<text x="653.1" y="360.0" text-anchor="middle" font-size="11">131K</text>
+<text x="92" y="316.0" text-anchor="end" font-size="11">64</text>
+<text x="92" y="260.0" text-anchor="end" font-size="11">128</text>
+<text x="92" y="204.0" text-anchor="end" font-size="11">256</text>
+<text x="92" y="148.0" text-anchor="end" font-size="11">512</text>
+<text x="92" y="92.0" text-anchor="end" font-size="11">1K</text>
+<text x="395.0" y="395" text-anchor="middle" font-size="13">N (tokens)</text>
+<text x="25" y="200.0" text-anchor="middle" font-size="13" transform="rotate(-90 25,200.0)">d_sem</text>
+</svg>

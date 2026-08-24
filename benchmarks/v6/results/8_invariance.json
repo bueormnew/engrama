@@ -1,0 +1,9 @@
+{
+  "test": "v6_invariance",
+  "by_dtype": {
+    "float32": 2.980232238769531e-07,
+    "float16": 0.0,
+    "bfloat16": 0.0
+  },
+  "fp32_below_1e-6": true
+}

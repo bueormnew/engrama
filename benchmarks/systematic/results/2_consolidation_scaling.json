@@ -1,0 +1,120 @@
+{
+  "test": "2_consolidation_scaling",
+  "d_model": 256,
+  "num_layers": 9,
+  "device": "cpu",
+  "rows": [
+    {
+      "N": 128,
+      "fwd_s": 0.07745294500000455,
+      "throughput_tok_s": 1652.6163078756074,
+      "rss_mb": 0.08203125,
+      "output_bytes": 262144
+    },
+    {
+      "N": 256,
+      "fwd_s": 0.11521772800000463,
+      "throughput_tok_s": 2221.880299531594,
+      "rss_mb": 3.99609375,
+      "output_bytes": 524288
+    },
+    {
+      "N": 512,
+      "fwd_s": 0.15680813099999114,
+      "throughput_tok_s": 3265.136805948085,
+      "rss_mb": 4.390625,
+      "output_bytes": 1048576
+    },
+    {
+      "N": 1024,
+      "fwd_s": 0.3247259859999758,
+      "throughput_tok_s": 3153.4279489417772,
+      "rss_mb": 0.0,
+      "output_bytes": 2097152
+    },
+    {
+      "N": 2048,
+      "fwd_s": 0.5993471320000481,
+      "throughput_tok_s": 3417.051472601083,
+      "rss_mb": 10.55859375,
+      "output_bytes": 4194304
+    },
+    {
+      "N": 4096,
+      "fwd_s": 0.7556999919999612,
+      "throughput_tok_s": 5420.1403246808695,
+      "rss_mb": 0.0,
+      "output_bytes": 8388608
+    },
+    {
+      "N": 8192,
+      "fwd_s": 1.731177257000013,
+      "throughput_tok_s": 4732.039984279864,
+      "rss_mb": 0.109375,
+      "output_bytes": 16777216
+    },
+    {
+      "N": 16384,
+      "fwd_s": 4.09283825,
+      "throughput_tok_s": 4003.090031715766,
+      "rss_mb": 0.08984375,
+      "output_bytes": 33554432
+    }
+  ],
+  "fit": {
+    "linear": {
+      "a": 0.00024015846361269487,
+      "b": 0.0018118960852048082,
+      "r2": 0.9880540040651808
+    },
+    "nlogn": {
+      "a": 1.7133155803835592e-05,
+      "b": 0.07072279984666903,
+      "r2": 0.9933777054788754
+    },
+    "quadratic": {
+      "a": 5.31396887222317e-09,
+      "b": 0.00015583780504432006,
+      "c": 0.10810086781608504,
+      "r2": 0.9972315711778921
+    },
+    "best": "quadratic"
+  },
+  "empirical_exponent": 0.8012222272142571,
+  "conclusion": {
+    "linear_r2": 0.9880540040651808,
+    "quadratic_r2": 0.9972315711778921,
+    "nlogn_r2": 0.9933777054788754,
+    "best_model": "quadratic",
+    "is_linear": false,
+    "refined_is_linear": true
+  },
+  "refined": {
+    "Ns": [
+      256,
+      512,
+      1024,
+      2048,
+      4096,
+      8192,
+      16384,
+      32768
+    ],
+    "per_token_us": [
+      196.68,
+      200.81,
+      168.16,
+      169.69,
+      149.48,
+      194.83,
+      258.93,
+      271.08
+    ],
+    "exponent": 1.066,
+    "linear_r2": 0.994585,
+    "nlogn_r2": 0.997728,
+    "quadratic_r2": 0.99712,
+    "per_token_slope_ns_per_N": 3.19,
+    "note": "Con 5 repeticiones el coste por token es ~constante -> O(N). El 'mejor' ajuste nlogn/quadratic se debe a overhead fijo por capa (L=9) y ruido de threading en CPU, no a un termino N^2."
+  }
+}

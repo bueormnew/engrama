@@ -1,0 +1,25 @@
+=== BENCHMARK V6 ===
+[1] trace: build exp=0.98 mem R2(lin)=1.00000
+[2] consolidation: exp=1.08 R2(lin)=0.9901
+[3] lexico invertido: exp=1.13 R2(lin)=0.9992
+[4/5] semantic LSH: exp=0.96 min_recall=1.0000 C_acotado=True
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=6 and offset_mode='resonant_multirate' the binary receptive field covers ~63 positions, below context_length=256 (recommended L >= 8, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+[6] params: tiny=393,567 small=1,425,783 base=6,861,880 vocab_correcto=True
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=4 and offset_mode='resonant_multirate' the binary receptive field covers ~15 positions, below context_length=300 (recommended L >= 9, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+[8] float32: maxdiff=1.438e-01
+[8] float16: maxdiff=1.953e-03
+[8] bfloat16: maxdiff=1.172e-02
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=4 and offset_mode='resonant_multirate' the binary receptive field covers ~15 positions, below context_length=256 (recommended L >= 8, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+[9] numerico: NaN=0 estable=True
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=4 and offset_mode='resonant_multirate' the binary receptive field covers ~15 positions, below context_length=1016 (recommended L >= 10, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=4 and offset_mode='resonant_multirate' the binary receptive field covers ~15 positions, below context_length=10016 (recommended L >= 14, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+/home/user/engrama/src/engrama/v6/model.py:53: UserWarning: [ENGRAMA] Depth rule: with num_consolidation_layers=4 and offset_mode='resonant_multirate' the binary receptive field covers ~15 positions, below context_length=100016 (recommended L >= 17, or enable global_anchor=True).
+  self._inner = EngramaConfig(
+[10] memoria efectiva: todas_exactas=True
+[11] interferencia: sin_contaminacion=True
+=== TERMINADO ===

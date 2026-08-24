@@ -1,0 +1,266 @@
+{
+  "test": "7_context_x_params",
+  "k_param_per_d2": 138.92475583676938,
+  "measured_matrix": {
+    "10M": {
+      "1024": {
+        "params": 8787319,
+        "weights_MB": 35.149276,
+        "trace_MB": 2.883584,
+        "activations_MB": 579.33824,
+        "total_MB": 617.3711,
+        "flops_G": 3.154116608,
+        "dominant": "semantic_recall_N2"
+      },
+      "4096": {
+        "params": 8787319,
+        "weights_MB": 35.149276,
+        "trace_MB": 11.534336,
+        "activations_MB": 8759.803904,
+        "total_MB": 8806.487516,
+        "flops_G": 14.227079168,
+        "dominant": "semantic_recall_N2"
+      },
+      "16384": {
+        "params": 8787319,
+        "weights_MB": 35.149276,
+        "trace_MB": 46.137344,
+        "activations_MB": 138118.43072,
+        "total_MB": 138199.71734,
+        "flops_G": 82.678120448,
+        "dominant": "semantic_recall_N2"
+      },
+      "65536": {
+        "params": 8787319,
+        "weights_MB": 35.149276,
+        "trace_MB": 184.549376,
+        "activations_MB": 2201741.164544,
+        "total_MB": 2201960.863196,
+        "flops_G": 743.029342208,
+        "dominant": "semantic_recall_N2"
+      }
+    },
+    "30M": {
+      "1024": {
+        "params": 20552759,
+        "weights_MB": 82.211036,
+        "trace_MB": 3.93216,
+        "activations_MB": 599.785472,
+        "total_MB": 685.928668,
+        "flops_G": 6.928990208,
+        "dominant": "semantic_recall_N2"
+      },
+      "4096": {
+        "params": 20552759,
+        "weights_MB": 82.211036,
+        "trace_MB": 15.72864,
+        "activations_MB": 8841.592832,
+        "total_MB": 8939.532508,
+        "flops_G": 29.326573568,
+        "dominant": "semantic_recall_N2"
+      },
+      "16384": {
+        "params": 20552759,
+        "weights_MB": 82.211036,
+        "trace_MB": 62.91456,
+        "activations_MB": 138445.586432,
+        "total_MB": 138590.712028,
+        "flops_G": 143.076098048,
+        "dominant": "semantic_recall_N2"
+      },
+      "65536": {
+        "params": 20552759,
+        "weights_MB": 82.211036,
+        "trace_MB": 251.65824,
+        "activations_MB": 2203049.787392,
+        "total_MB": 2203383.656668,
+        "flops_G": 984.621252608,
+        "dominant": "semantic_recall_N2"
+      }
+    },
+    "100M": {
+      "1024": {
+        "params": 58698999,
+        "weights_MB": 234.795996,
+        "trace_MB": 6.422528,
+        "activations_MB": 909.901824,
+        "total_MB": 1151.120348,
+        "flops_G": 19.075694592,
+        "dominant": "semantic_recall_N2"
+      },
+      "4096": {
+        "params": 58698999,
+        "weights_MB": 234.795996,
+        "trace_MB": 25.690112,
+        "activations_MB": 13303.283712,
+        "total_MB": 13563.76982,
+        "flops_G": 78.718697472,
+        "dominant": "semantic_recall_N2"
+      },
+      "16384": {
+        "params": 58698999,
+        "weights_MB": 234.795996,
+        "trace_MB": 102.760448,
+        "activations_MB": 207831.957504,
+        "total_MB": 208169.513948,
+        "flops_G": 353.529495552,
+        "dominant": "semantic_recall_N2"
+      },
+      "65536": {
+        "params": 58698999,
+        "weights_MB": 234.795996,
+        "trace_MB": 411.041792,
+        "activations_MB": 3305228.992512,
+        "total_MB": 3305874.8303,
+        "flops_G": 2032.593272832,
+        "dominant": "semantic_recall_N2"
+      }
+    }
+  },
+  "extrapolated": {
+    "300M_N1024": {
+      "params": 300000000.0,
+      "d_model_est": 1469.504114059396,
+      "weights_GB": 1.2,
+      "trace_GB": 0.013611041702374573,
+      "activations_GB": 1.2904290226427424,
+      "total_GB": 2.5040400643451166,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "300M_N4096": {
+      "params": 300000000.0,
+      "d_model_est": 1469.504114059396,
+      "weights_GB": 1.2,
+      "trace_GB": 0.05444416680949829,
+      "activations_GB": 18.046617978570968,
+      "total_GB": 19.301062145380467,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "300M_N16384": {
+      "params": 300000000.0,
+      "d_model_est": 1469.504114059396,
+      "weights_GB": 1.2,
+      "trace_GB": 0.21777666723799316,
+      "activations_GB": 278.3449021222839,
+      "total_GB": 279.76267878952183,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "300M_N65536": {
+      "params": 300000000.0,
+      "d_model_est": 1469.504114059396,
+      "weights_GB": 1.2,
+      "trace_GB": 0.8711066689519726,
+      "activations_GB": 4411.914491817136,
+      "total_GB": 4413.985598486088,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "1B_N1024": {
+      "params": 1000000000.0,
+      "d_model_est": 2682.935172056586,
+      "weights_GB": 4.0,
+      "trace_GB": 0.023551468929487552,
+      "activations_GB": 1.4693567127307758,
+      "total_GB": 5.492908181660263,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "1B_N4096": {
+      "params": 1000000000.0,
+      "d_model_est": 2682.935172056586,
+      "weights_GB": 4.0,
+      "trace_GB": 0.09420587571795021,
+      "activations_GB": 18.762328738923102,
+      "total_GB": 22.856534614641053,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "1B_N16384": {
+      "params": 1000000000.0,
+      "d_model_est": 2682.935172056586,
+      "weights_GB": 4.0,
+      "trace_GB": 0.37682350287180083,
+      "activations_GB": 281.20774516369244,
+      "total_GB": 285.5845686665643,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "1B_N65536": {
+      "params": 1000000000.0,
+      "d_model_est": 2682.935172056586,
+      "weights_GB": 4.0,
+      "trace_GB": 1.5072940114872033,
+      "activations_GB": 4423.36586398277,
+      "total_GB": 4428.873157994257,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "10B_N1024": {
+      "params": 10000000000.0,
+      "d_model_est": 8484.18595827455,
+      "weights_GB": 40.0,
+      "trace_GB": 0.0710753153701851,
+      "activations_GB": 2.3247859486633318,
+      "total_GB": 42.39586126403351,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "10B_N4096": {
+      "params": 10000000000.0,
+      "d_model_est": 8484.18595827455,
+      "weights_GB": 40.0,
+      "trace_GB": 0.2843012614807404,
+      "activations_GB": 22.184045682653327,
+      "total_GB": 62.46834694413407,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "10B_N16384": {
+      "params": 10000000000.0,
+      "d_model_est": 8484.18595827455,
+      "weights_GB": 40.0,
+      "trace_GB": 1.1372050459229617,
+      "activations_GB": 294.8946129386133,
+      "total_GB": 336.03181798453625,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "10B_N65536": {
+      "params": 10000000000.0,
+      "d_model_est": 8484.18595827455,
+      "weights_GB": 40.0,
+      "trace_GB": 4.548820183691847,
+      "activations_GB": 4478.113335082453,
+      "total_GB": 4522.6621552661445,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "100B_N1024": {
+      "params": 100000000000.0,
+      "d_model_est": 26829.351720565857,
+      "weights_GB": 400.0,
+      "trace_GB": 0.2213589132948755,
+      "activations_GB": 5.029890711307759,
+      "total_GB": 405.2512496246026,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "100B_N4096": {
+      "params": 100000000000.0,
+      "d_model_est": 26829.351720565857,
+      "weights_GB": 400.0,
+      "trace_GB": 0.885435653179502,
+      "activations_GB": 33.00446473323104,
+      "total_GB": 433.88990038641055,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "100B_N16384": {
+      "params": 100000000000.0,
+      "d_model_est": 26829.351720565857,
+      "weights_GB": 400.0,
+      "trace_GB": 3.541742612718008,
+      "activations_GB": 338.17628914092415,
+      "total_GB": 741.7180317536421,
+      "note": "estimacion matematica (no ejecutado)"
+    },
+    "100B_N65536": {
+      "params": 100000000000.0,
+      "d_model_est": 26829.351720565857,
+      "weights_GB": 400.0,
+      "trace_GB": 14.166970450872032,
+      "activations_GB": 4651.240039891696,
+      "total_GB": 5065.407010342568,
+      "note": "estimacion matematica (no ejecutado)"
+    }
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "test": "9_numeric_stress",
+  "device": "cpu",
+  "by_dtype": {
+    "float32": [
+      {
+        "kind": "normal",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.9020108580589294,
+        "mean_abs": 0.14374342560768127,
+        "variance": 0.033864155411720276
+      },
+      {
+        "kind": "large",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 30.0,
+        "mean_abs": 25.688323974609375,
+        "variance": 715.2906494140625
+      },
+      {
+        "kind": "small",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.0021331231109797955,
+        "mean_abs": 0.0004912791191600263,
+        "variance": 4.041243926167226e-07
+      },
+      {
+        "kind": "repeated",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.06346291303634644,
+        "mean_abs": 0.04943210631608963,
+        "variance": 0.0007146713323891163
+      },
+      {
+        "kind": "nearzero",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 2.1714536160288844e-06,
+        "mean_abs": 4.874947308053379e-07,
+        "variance": 4.103943747335581e-13
+      },
+      {
+        "kind": "noise",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 3.204016923904419,
+        "mean_abs": 0.5597950220108032,
+        "variance": 0.4980485141277313
+      }
+    ],
+    "float16": [
+      {
+        "kind": "normal",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 12,
+        "max_abs": 1.03515625,
+        "mean_abs": 0.11427181959152222,
+        "variance": 0.02134472317993641
+      },
+      {
+        "kind": "large",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 30.0,
+        "mean_abs": 25.493423461914062,
+        "variance": 706.31396484375
+      },
+      {
+        "kind": "small",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 422,
+        "max_abs": 0.0015649795532226562,
+        "mean_abs": 0.0003621001960709691,
+        "variance": 2.2000799049237685e-07
+      },
+      {
+        "kind": "repeated",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.65234375,
+        "mean_abs": 0.5328484773635864,
+        "variance": 0.0335882343351841
+      },
+      {
+        "kind": "nearzero",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 121657,
+        "max_abs": 1.7881393432617188e-06,
+        "mean_abs": 1.284433892578818e-07,
+        "variance": 2.2855651290835943e-13
+      },
+      {
+        "kind": "noise",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 1,
+        "max_abs": 3.623046875,
+        "mean_abs": 0.5372880697250366,
+        "variance": 0.46008458733558655
+      }
+    ],
+    "bfloat16": [
+      {
+        "kind": "normal",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.78125,
+        "mean_abs": 0.11844874173402786,
+        "variance": 0.02303972840309143
+      },
+      {
+        "kind": "large",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 30.0,
+        "mean_abs": 25.61170196533203,
+        "variance": 711.9495239257812
+      },
+      {
+        "kind": "small",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.00180816650390625,
+        "mean_abs": 0.0003932672552764416,
+        "variance": 2.6778204187394294e-07
+      },
+      {
+        "kind": "repeated",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 0.384765625,
+        "mean_abs": 0.3462066650390625,
+        "variance": 0.0030648629181087017
+      },
+      {
+        "kind": "nearzero",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 1.564621925354004e-06,
+        "mean_abs": 3.9800139006729296e-07,
+        "variance": 2.7462014324901307e-13
+      },
+      {
+        "kind": "noise",
+        "nan": 0,
+        "inf": 0,
+        "overflow": 0,
+        "underflow": 0,
+        "max_abs": 3.53125,
+        "mean_abs": 0.534583568572998,
+        "variance": 0.4555571377277374
+      }
+    ]
+  },
+  "total_nan": 0,
+  "total_inf": 0,
+  "stable": true
+}
