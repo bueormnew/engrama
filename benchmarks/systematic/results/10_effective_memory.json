@@ -1,0 +1,51 @@
+{
+  "test": "10_effective_memory",
+  "rows": [
+    {
+      "N": 10,
+      "recover_first": true,
+      "recover_random": true,
+      "recover_last": true,
+      "accuracy": 1.0,
+      "read_ms": 0.00447480001639633,
+      "trace_bytes": 14336
+    },
+    {
+      "N": 100,
+      "recover_first": true,
+      "recover_random": true,
+      "recover_last": true,
+      "accuracy": 1.0,
+      "read_ms": 0.006175199996505398,
+      "trace_bytes": 106496
+    },
+    {
+      "N": 1000,
+      "recover_first": true,
+      "recover_random": true,
+      "recover_last": true,
+      "accuracy": 1.0,
+      "read_ms": 0.0044765999973606085,
+      "trace_bytes": 1032192
+    },
+    {
+      "N": 10000,
+      "recover_first": true,
+      "recover_random": true,
+      "recover_last": true,
+      "accuracy": 1.0,
+      "read_ms": 0.0049574000058782985,
+      "trace_bytes": 10321920
+    },
+    {
+      "N": 100000,
+      "recover_first": true,
+      "recover_random": true,
+      "recover_last": true,
+      "accuracy": 1.0,
+      "read_ms": 0.006363200009218417,
+      "trace_bytes": 103202816
+    }
+  ],
+  "all_exact": true
+}

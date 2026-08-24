@@ -1,0 +1,133 @@
+{
+  "test": "6_param_scaling",
+  "device": "cpu",
+  "rows": [
+    {
+      "params": 1237299,
+      "trainable": 1237299,
+      "param_bytes_fp32": 4949196,
+      "buffer_bytes": 0,
+      "trace_bytes": 144896,
+      "fwd_s_seq64": 0.018276588000048832,
+      "fwd_ms_seq64": 18.276588000048832,
+      "inc_s_per_token": 0.013103882187500915,
+      "inc_ms_per_token": 13.103882187500915,
+      "d_model": 96,
+      "d_ff": 384,
+      "d_gate": 12,
+      "num_con_layers": 9,
+      "synapse_rank": 24
+    },
+    {
+      "params": 4895879,
+      "trainable": 4895879,
+      "param_bytes_fp32": 19583516,
+      "buffer_bytes": 0,
+      "trace_bytes": 263168,
+      "fwd_s_seq64": 0.023625385000059396,
+      "fwd_ms_seq64": 23.625385000059396,
+      "inc_s_per_token": 0.01308407056249905,
+      "inc_ms_per_token": 13.08407056249905,
+      "d_model": 192,
+      "d_ff": 768,
+      "d_gate": 24,
+      "num_con_layers": 9,
+      "synapse_rank": 32
+    },
+    {
+      "params": 8787319,
+      "trainable": 8787319,
+      "param_bytes_fp32": 35149276,
+      "buffer_bytes": 0,
+      "trace_bytes": 342016,
+      "fwd_s_seq64": 0.03578102200003741,
+      "fwd_ms_seq64": 35.78102200003741,
+      "inc_s_per_token": 0.013548898937500553,
+      "inc_ms_per_token": 13.548898937500553,
+      "d_model": 256,
+      "d_ff": 1024,
+      "d_gate": 32,
+      "num_con_layers": 9,
+      "synapse_rank": 32
+    },
+    {
+      "params": 20552759,
+      "trainable": 20552759,
+      "param_bytes_fp32": 82211036,
+      "buffer_bytes": 0,
+      "trace_bytes": 499712,
+      "fwd_s_seq64": 0.0779528760000403,
+      "fwd_ms_seq64": 77.9528760000403,
+      "inc_s_per_token": 0.017224086124997484,
+      "inc_ms_per_token": 17.224086124997484,
+      "d_model": 384,
+      "d_ff": 1536,
+      "d_gate": 48,
+      "num_con_layers": 9,
+      "synapse_rank": 32
+    },
+    {
+      "params": 38286199,
+      "trainable": 38286199,
+      "param_bytes_fp32": 153144796,
+      "buffer_bytes": 0,
+      "trace_bytes": 657408,
+      "fwd_s_seq64": 0.1232578020000119,
+      "fwd_ms_seq64": 123.2578020000119,
+      "inc_s_per_token": 0.024853631187504277,
+      "inc_ms_per_token": 24.853631187504277,
+      "d_model": 512,
+      "d_ff": 2048,
+      "d_gate": 64,
+      "num_con_layers": 9,
+      "synapse_rank": 32
+    },
+    {
+      "params": 94815095,
+      "trainable": 94815095,
+      "param_bytes_fp32": 379260380,
+      "buffer_bytes": 0,
+      "trace_bytes": 972800,
+      "fwd_s_seq64": 0.3194559119999667,
+      "fwd_ms_seq64": 319.4559119999667,
+      "inc_s_per_token": 0.0378690124999963,
+      "inc_ms_per_token": 37.8690124999963,
+      "d_model": 768,
+      "d_ff": 3072,
+      "d_gate": 96,
+      "num_con_layers": 9,
+      "synapse_rank": 32
+    }
+  ],
+  "param_fit_d2": {
+    "a": 190.4034136087252,
+    "b": -26340.726700824842,
+    "c": 2531510.9832638907
+  },
+  "extrapolation": {
+    "1B": {
+      "params": 1000000000.0,
+      "estimated_d_model": 2359.038904778929,
+      "weights_fp32_GB": 4.0,
+      "weights_fp16_GB": 2.0,
+      "train_adam_fp32_GB": 20.0,
+      "note": "Sin activadores/traza. Entrenar requiere ademas activaciones y optimizer states."
+    },
+    "10B": {
+      "params": 10000000000.0,
+      "estimated_d_model": 7315.65659720065,
+      "weights_fp32_GB": 40.0,
+      "weights_fp16_GB": 20.0,
+      "train_adam_fp32_GB": 200.0,
+      "note": "Sin activadores/traza. Entrenar requiere ademas activaciones y optimizer states."
+    },
+    "100B": {
+      "params": 100000000000.0,
+      "estimated_d_model": 22986.242137037087,
+      "weights_fp32_GB": 400.0,
+      "weights_fp16_GB": 200.0,
+      "train_adam_fp32_GB": 2000.0,
+      "note": "Sin activadores/traza. Entrenar requiere ademas activaciones y optimizer states."
+    }
+  }
+}

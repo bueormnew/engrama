@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" font-family="Helvetica,Arial,sans-serif" style="background:#fff">
+<text x="380.0" y="28" text-anchor="middle" font-size="18" font-weight="bold">Prueba 5 — Recall semantico</text>
+<line x1="90" y1="50" x2="90" y2="350" stroke="#333"/>
+<line x1="90" y1="350" x2="730" y2="350" stroke="#333"/>
+<line x1="167.3" y1="350" x2="167.3" y2="355" stroke="#333"/>
+<text x="167.3" y="370" text-anchor="middle" font-size="11">1K</text>
+<line x1="247.3" y1="350" x2="247.3" y2="355" stroke="#333"/>
+<text x="247.3" y="370" text-anchor="middle" font-size="11">2K</text>
+<line x1="353.0" y1="350" x2="353.0" y2="355" stroke="#333"/>
+<text x="353.0" y="370" text-anchor="middle" font-size="11">5K</text>
+<line x1="433.0" y1="350" x2="433.0" y2="355" stroke="#333"/>
+<text x="433.0" y="370" text-anchor="middle" font-size="11">10K</text>
+<line x1="513.0" y1="350" x2="513.0" y2="355" stroke="#333"/>
+<text x="513.0" y="370" text-anchor="middle" font-size="11">20K</text>
+<line x1="618.8" y1="350" x2="618.8" y2="355" stroke="#333"/>
+<text x="618.8" y="370" text-anchor="middle" font-size="11">50K</text>
+<line x1="698.8" y1="350" x2="698.8" y2="355" stroke="#333"/>
+<text x="698.8" y="370" text-anchor="middle" font-size="11">100K</text>
+<line x1="85" y1="350.0" x2="90" y2="350.0" stroke="#333"/>
+<text x="82" y="354.0" text-anchor="end" font-size="11">0.062</text>
+<line x1="85" y1="300.0" x2="90" y2="300.0" stroke="#333"/>
+<text x="82" y="304.0" text-anchor="end" font-size="11">0.25</text>
+<line x1="85" y1="250.0" x2="90" y2="250.0" stroke="#333"/>
+<text x="82" y="254.0" text-anchor="end" font-size="11">0.44</text>
+<line x1="85" y1="200.0" x2="90" y2="200.0" stroke="#333"/>
+<text x="82" y="204.0" text-anchor="end" font-size="11">0.63</text>
+<line x1="85" y1="150.0" x2="90" y2="150.0" stroke="#333"/>
+<text x="82" y="154.0" text-anchor="end" font-size="11">0.82</text>
+<line x1="85" y1="100.0" x2="90" y2="100.0" stroke="#333"/>
+<text x="82" y="104.0" text-anchor="end" font-size="11">1</text>
+<line x1="85" y1="50.0" x2="90" y2="50.0" stroke="#333"/>
+<text x="82" y="54.0" text-anchor="end" font-size="11">1</text>
+<text x="410.0" y="395" text-anchor="middle" font-size="13">N (tokens)</text>
+<text x="20" y="200.0" text-anchor="middle" font-size="13" transform="rotate(-90 20,200.0)">Recall@1</text>
+<polyline points="90.0,102.7 170.0,102.7 250.0,102.7 330.0,102.7 410.0,102.7" fill="none" stroke="#d62728" stroke-width="2.2"/>
+<circle cx="90.0" cy="102.7" r="3" fill="#d62728"/>
+<circle cx="170.0" cy="102.7" r="3" fill="#d62728"/>
+<circle cx="250.0" cy="102.7" r="3" fill="#d62728"/>
+<circle cx="330.0" cy="102.7" r="3" fill="#d62728"/>
+<circle cx="410.0" cy="102.7" r="3" fill="#d62728"/>
+<polyline points="90.0,102.7 170.0,234.5 250.0,300.3 330.0,333.3 410.0,345.9 490.0,308.5 570.0,211.7 650.0,156.8 730.0,129.9" fill="none" stroke="#1f77b4" stroke-width="2.2"/>
+<circle cx="90.0" cy="102.7" r="3" fill="#1f77b4"/>
+<circle cx="170.0" cy="234.5" r="3" fill="#1f77b4"/>
+<circle cx="250.0" cy="300.3" r="3" fill="#1f77b4"/>
+<circle cx="330.0" cy="333.3" r="3" fill="#1f77b4"/>
+<circle cx="410.0" cy="345.9" r="3" fill="#1f77b4"/>
+<circle cx="490.0" cy="308.5" r="3" fill="#1f77b4"/>
+<circle cx="570.0" cy="211.7" r="3" fill="#1f77b4"/>
+<circle cx="650.0" cy="156.8" r="3" fill="#1f77b4"/>
+<circle cx="730.0" cy="129.9" r="3" fill="#1f77b4"/>
+<rect x="580" y="50" width="14" height="14" fill="#d62728"/>
+<text x="600" y="62" font-size="12">dense</text>
+<rect x="580" y="70" width="14" height="14" fill="#1f77b4"/>
+<text x="600" y="82" font-size="12">LSH</text>
+</svg>

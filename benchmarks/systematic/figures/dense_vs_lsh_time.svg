@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" font-family="Helvetica,Arial,sans-serif" style="background:#fff">
+<text x="380.0" y="28" text-anchor="middle" font-size="18" font-weight="bold">Prueba 5 — Dense vs LSH: tiempo</text>
+<line x1="90" y1="50" x2="90" y2="350" stroke="#333"/>
+<line x1="90" y1="350" x2="730" y2="350" stroke="#333"/>
+<line x1="167.3" y1="350" x2="167.3" y2="355" stroke="#333"/>
+<text x="167.3" y="370" text-anchor="middle" font-size="11">1K</text>
+<line x1="247.3" y1="350" x2="247.3" y2="355" stroke="#333"/>
+<text x="247.3" y="370" text-anchor="middle" font-size="11">2K</text>
+<line x1="353.0" y1="350" x2="353.0" y2="355" stroke="#333"/>
+<text x="353.0" y="370" text-anchor="middle" font-size="11">5K</text>
+<line x1="433.0" y1="350" x2="433.0" y2="355" stroke="#333"/>
+<text x="433.0" y="370" text-anchor="middle" font-size="11">10K</text>
+<line x1="513.0" y1="350" x2="513.0" y2="355" stroke="#333"/>
+<text x="513.0" y="370" text-anchor="middle" font-size="11">20K</text>
+<line x1="618.8" y1="350" x2="618.8" y2="355" stroke="#333"/>
+<text x="618.8" y="370" text-anchor="middle" font-size="11">50K</text>
+<line x1="698.8" y1="350" x2="698.8" y2="355" stroke="#333"/>
+<text x="698.8" y="370" text-anchor="middle" font-size="11">100K</text>
+<line x1="85" y1="349.4" x2="90" y2="349.4" stroke="#333"/>
+<text x="82" y="353.4" text-anchor="end" font-size="11">0.001</text>
+<line x1="85" y1="326.9" x2="90" y2="326.9" stroke="#333"/>
+<text x="82" y="330.9" text-anchor="end" font-size="11">0.002</text>
+<line x1="85" y1="297.2" x2="90" y2="297.2" stroke="#333"/>
+<text x="82" y="301.2" text-anchor="end" font-size="11">0.005</text>
+<line x1="85" y1="274.7" x2="90" y2="274.7" stroke="#333"/>
+<text x="82" y="278.7" text-anchor="end" font-size="11">0.01</text>
+<line x1="85" y1="252.3" x2="90" y2="252.3" stroke="#333"/>
+<text x="82" y="256.3" text-anchor="end" font-size="11">0.02</text>
+<line x1="85" y1="222.6" x2="90" y2="222.6" stroke="#333"/>
+<text x="82" y="226.6" text-anchor="end" font-size="11">0.05</text>
+<line x1="85" y1="200.1" x2="90" y2="200.1" stroke="#333"/>
+<text x="82" y="204.1" text-anchor="end" font-size="11">0.1</text>
+<line x1="85" y1="177.6" x2="90" y2="177.6" stroke="#333"/>
+<text x="82" y="181.6" text-anchor="end" font-size="11">0.2</text>
+<line x1="85" y1="147.9" x2="90" y2="147.9" stroke="#333"/>
+<text x="82" y="151.9" text-anchor="end" font-size="11">0.5</text>
+<line x1="85" y1="125.5" x2="90" y2="125.5" stroke="#333"/>
+<text x="82" y="129.5" text-anchor="end" font-size="11">1</text>
+<line x1="85" y1="103.0" x2="90" y2="103.0" stroke="#333"/>
+<text x="82" y="107.0" text-anchor="end" font-size="11">2</text>
+<line x1="85" y1="73.3" x2="90" y2="73.3" stroke="#333"/>
+<text x="82" y="77.3" text-anchor="end" font-size="11">5</text>
+<line x1="85" y1="50.8" x2="90" y2="50.8" stroke="#333"/>
+<text x="82" y="54.8" text-anchor="end" font-size="11">10</text>
+<text x="410.0" y="395" text-anchor="middle" font-size="13">N (tokens)</text>
+<text x="20" y="200.0" text-anchor="middle" font-size="13" transform="rotate(-90 20,200.0)">segundos</text>
+<polyline points="90.0,342.8 170.0,312.1 250.0,275.1 330.0,224.3 410.0,164.1" fill="none" stroke="#d62728" stroke-width="2.2"/>
+<circle cx="90.0" cy="342.8" r="3" fill="#d62728"/>
+<circle cx="170.0" cy="312.1" r="3" fill="#d62728"/>
+<circle cx="250.0" cy="275.1" r="3" fill="#d62728"/>
+<circle cx="330.0" cy="224.3" r="3" fill="#d62728"/>
+<circle cx="410.0" cy="164.1" r="3" fill="#d62728"/>
+<polyline points="90.0,235.6 170.0,214.2 250.0,190.0 330.0,168.2 410.0,145.7 490.0,123.4 570.0,100.1 650.0,79.1 730.0,55.9" fill="none" stroke="#1f77b4" stroke-width="2.2"/>
+<circle cx="90.0" cy="235.6" r="3" fill="#1f77b4"/>
+<circle cx="170.0" cy="214.2" r="3" fill="#1f77b4"/>
+<circle cx="250.0" cy="190.0" r="3" fill="#1f77b4"/>
+<circle cx="330.0" cy="168.2" r="3" fill="#1f77b4"/>
+<circle cx="410.0" cy="145.7" r="3" fill="#1f77b4"/>
+<circle cx="490.0" cy="123.4" r="3" fill="#1f77b4"/>
+<circle cx="570.0" cy="100.1" r="3" fill="#1f77b4"/>
+<circle cx="650.0" cy="79.1" r="3" fill="#1f77b4"/>
+<circle cx="730.0" cy="55.9" r="3" fill="#1f77b4"/>
+<rect x="580" y="50" width="14" height="14" fill="#d62728"/>
+<text x="600" y="62" font-size="12">dense O(N^2)</text>
+<rect x="580" y="70" width="14" height="14" fill="#1f77b4"/>
+<text x="600" y="82" font-size="12">LSH O(N*C)</text>
+</svg>

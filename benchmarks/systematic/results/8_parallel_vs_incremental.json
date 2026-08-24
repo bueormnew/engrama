@@ -1,0 +1,244 @@
+{
+  "test": "8_parallel_vs_incremental",
+  "device": "cpu",
+  "by_dtype": {
+    "float32": [
+      {
+        "N": 16,
+        "max_abs_err": 2.8312206268310547e-07,
+        "mean_abs_err": 3.5646600338168355e-08,
+        "parallel_s": 0.26893136200010304,
+        "incremental_s": 1.4919107789999089,
+        "incremental_s_per_token": 0.0932444236874943,
+        "throughput_parallel": 59.49473457094926,
+        "throughput_incremental": 10.724501910714446
+      },
+      {
+        "N": 32,
+        "max_abs_err": 2.980232238769531e-07,
+        "mean_abs_err": 3.8787412393048726e-08,
+        "parallel_s": 0.35639720000017405,
+        "incremental_s": 0.3027070769999227,
+        "incremental_s_per_token": 0.009459596156247585,
+        "throughput_parallel": 89.78746185431416,
+        "throughput_incremental": 105.7127580800107
+      },
+      {
+        "N": 64,
+        "max_abs_err": 2.980232238769531e-07,
+        "mean_abs_err": 3.864884234872079e-08,
+        "parallel_s": 0.016820459999962623,
+        "incremental_s": 0.6404855390001103,
+        "incremental_s_per_token": 0.010007586546876723,
+        "throughput_parallel": 3804.8899970715556,
+        "throughput_incremental": 99.92419204329448
+      },
+      {
+        "N": 128,
+        "max_abs_err": 3.2782554626464844e-07,
+        "mean_abs_err": 3.94567507555621e-08,
+        "parallel_s": 0.019515498999908232,
+        "incremental_s": 1.1035590229998888,
+        "incremental_s_per_token": 0.008621554867186632,
+        "throughput_parallel": 6558.889424277693,
+        "throughput_incremental": 115.98835887549342
+      },
+      {
+        "N": 256,
+        "max_abs_err": 3.5762786865234375e-07,
+        "mean_abs_err": 4.108338913511034e-08,
+        "parallel_s": 0.02539117600008467,
+        "incremental_s": 2.281373872000131,
+        "incremental_s_per_token": 0.008911616687500512,
+        "throughput_parallel": 10082.242744453677,
+        "throughput_incremental": 112.2130849055263
+      },
+      {
+        "N": 512,
+        "max_abs_err": 3.8743019104003906e-07,
+        "mean_abs_err": 4.354579630216904e-08,
+        "parallel_s": 0.04182452899999589,
+        "incremental_s": 4.448338649000107,
+        "incremental_s_per_token": 0.008688161423828333,
+        "throughput_parallel": 12241.620222430964,
+        "throughput_incremental": 115.09915058177661
+      },
+      {
+        "N": 1024,
+        "max_abs_err": 5.066394805908203e-07,
+        "mean_abs_err": 4.472743597716544e-08,
+        "parallel_s": 0.07287628499989296,
+        "incremental_s": 9.236784323000165,
+        "incremental_s_per_token": 0.009020297190429849,
+        "throughput_parallel": 14051.21021195721,
+        "throughput_incremental": 110.86109236633105
+      },
+      {
+        "N": 2048,
+        "max_abs_err": 5.364418029785156e-07,
+        "mean_abs_err": 4.4516607289324384e-08,
+        "parallel_s": 0.18651147799982937,
+        "incremental_s": 18.871115873000008,
+        "incremental_s_per_token": 0.009214412047363285,
+        "throughput_parallel": 10980.557453959342,
+        "throughput_incremental": 108.52564383488269
+      },
+      {
+        "N": 4096,
+        "max_abs_err": 5.960464477539062e-07,
+        "mean_abs_err": 4.516522267294931e-08,
+        "parallel_s": 0.4402468820001104,
+        "incremental_s": 39.956970729999966,
+        "incremental_s_per_token": 0.009755119807128898,
+        "throughput_parallel": 9303.870549613506,
+        "throughput_incremental": 102.51027355596543
+      }
+    ],
+    "float16": [
+      {
+        "N": 16,
+        "max_abs_err": 0.00048828125,
+        "mean_abs_err": 1.9677931049955077e-05,
+        "parallel_s": 0.019000626999968517,
+        "incremental_s": 0.15827936400000908,
+        "incremental_s_per_token": 0.009892460250000568,
+        "throughput_parallel": 842.0774746026282,
+        "throughput_incremental": 101.08708801735571
+      },
+      {
+        "N": 32,
+        "max_abs_err": 0.00048828125,
+        "mean_abs_err": 2.4226093955803663e-05,
+        "parallel_s": 0.025378344999808178,
+        "incremental_s": 0.36790197599998464,
+        "incremental_s_per_token": 0.01149693674999952,
+        "throughput_parallel": 1260.9175263494083,
+        "throughput_incremental": 86.97969048147036
+      },
+      {
+        "N": 64,
+        "max_abs_err": 0.00048828125,
+        "mean_abs_err": 3.1140858482103795e-05,
+        "parallel_s": 0.036333642000045074,
+        "incremental_s": 0.5984833949999029,
+        "incremental_s_per_token": 0.009351303046873483,
+        "throughput_parallel": 1761.452925636263,
+        "throughput_incremental": 106.9369685687109
+      },
+      {
+        "N": 128,
+        "max_abs_err": 0.0009765625,
+        "mean_abs_err": 4.3293348426232114e-05,
+        "parallel_s": 0.04997552999998334,
+        "incremental_s": 1.3574684140000954,
+        "incremental_s_per_token": 0.010605221984375746,
+        "throughput_parallel": 2561.253477452719,
+        "throughput_incremental": 94.2931700508731
+      },
+      {
+        "N": 256,
+        "max_abs_err": 0.0009765625,
+        "mean_abs_err": 5.7935892982641235e-05,
+        "parallel_s": 0.09365698800002065,
+        "incremental_s": 2.520795184999997,
+        "incremental_s_per_token": 0.00984685619140624,
+        "throughput_parallel": 2733.3785280383304,
+        "throughput_incremental": 101.5552558666127
+      },
+      {
+        "N": 512,
+        "max_abs_err": 0.0009765625,
+        "mean_abs_err": 6.618448969675228e-05,
+        "parallel_s": 0.1649455560000206,
+        "incremental_s": 5.09518980200005,
+        "incremental_s_per_token": 0.009951542582031347,
+        "throughput_parallel": 3104.054528149495,
+        "throughput_incremental": 100.48693373483773
+      },
+      {
+        "N": 1024,
+        "max_abs_err": 0.207275390625,
+        "mean_abs_err": 0.00011703196651069447,
+        "parallel_s": 0.31819586799997523,
+        "incremental_s": 10.738116275000039,
+        "incremental_s_per_token": 0.010486441674804725,
+        "throughput_parallel": 3218.1436120976896,
+        "throughput_incremental": 95.36123224741263
+      }
+    ],
+    "bfloat16": [
+      {
+        "N": 16,
+        "max_abs_err": 0.001953125,
+        "mean_abs_err": 0.0001324359909631312,
+        "parallel_s": 0.015596072999869648,
+        "incremental_s": 0.1499676629998703,
+        "incremental_s_per_token": 0.009372978937491894,
+        "throughput_parallel": 1025.8992760635147,
+        "throughput_incremental": 106.68966682513307
+      },
+      {
+        "N": 32,
+        "max_abs_err": 0.002197265625,
+        "mean_abs_err": 0.00023885606788098812,
+        "parallel_s": 0.018284605999951964,
+        "incremental_s": 0.33060871199995745,
+        "incremental_s_per_token": 0.01033152224999867,
+        "throughput_parallel": 1750.106072839856,
+        "throughput_incremental": 96.79115775994468
+      },
+      {
+        "N": 64,
+        "max_abs_err": 0.00390625,
+        "mean_abs_err": 0.00024516452685929835,
+        "parallel_s": 0.02620462699997006,
+        "incremental_s": 0.8185810520001269,
+        "incremental_s_per_token": 0.012790328937501982,
+        "throughput_parallel": 2442.3167710066286,
+        "throughput_incremental": 78.18407211310588
+      },
+      {
+        "N": 128,
+        "max_abs_err": 0.556640625,
+        "mean_abs_err": 0.0011716631706804037,
+        "parallel_s": 0.028143810000074154,
+        "incremental_s": 1.3664321559999735,
+        "incremental_s_per_token": 0.010675251218749793,
+        "throughput_parallel": 4548.069362309607,
+        "throughput_incremental": 93.67461050880193
+      },
+      {
+        "N": 256,
+        "max_abs_err": 0.0078125,
+        "mean_abs_err": 0.000489705300424248,
+        "parallel_s": 0.04150330899983601,
+        "incremental_s": 2.7129523579999386,
+        "incremental_s_per_token": 0.01059747014843726,
+        "throughput_parallel": 6168.182879129265,
+        "throughput_incremental": 94.36214360532674
+      },
+      {
+        "N": 512,
+        "max_abs_err": 0.2548828125,
+        "mean_abs_err": 0.0009333384223282337,
+        "parallel_s": 0.059970417999920755,
+        "incremental_s": 5.739409107000029,
+        "incremental_s_per_token": 0.01120978341210943,
+        "throughput_parallel": 8537.542626444201,
+        "throughput_incremental": 89.20778959205799
+      },
+      {
+        "N": 1024,
+        "max_abs_err": 0.546875,
+        "mean_abs_err": 0.0016822728794068098,
+        "parallel_s": 0.10260609800002385,
+        "incremental_s": 11.298167523000075,
+        "incremental_s_per_token": 0.01103336672167976,
+        "throughput_parallel": 9979.913669456195,
+        "throughput_incremental": 90.6341668164689
+      }
+    ]
+  },
+  "max_error_overall": 0.556640625,
+  "invariant_below_1e-6": false
+}

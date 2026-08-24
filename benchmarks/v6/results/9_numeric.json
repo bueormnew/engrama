@@ -1,0 +1,58 @@
+{
+  "test": "v6_numeric",
+  "by_dtype": {
+    "float32": {
+      "normal": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 1.1484911441802979
+      },
+      "large": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 30.0
+      },
+      "zero": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 0.0
+      }
+    },
+    "float16": {
+      "normal": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 0.67626953125
+      },
+      "large": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 30.0
+      },
+      "zero": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 0.0
+      }
+    },
+    "bfloat16": {
+      "normal": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 0.8125
+      },
+      "large": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 30.0
+      },
+      "zero": {
+        "nan": 0,
+        "inf": 0,
+        "max_abs": 0.0
+      }
+    }
+  },
+  "total_nan": 0,
+  "stable": true
+}
