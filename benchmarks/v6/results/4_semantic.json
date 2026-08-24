@@ -1,0 +1,48 @@
+{
+  "test": "v6_semantic",
+  "rows": [
+    {
+      "N": 1024,
+      "dense_s": 0.0024666610001986555,
+      "dense_recall": 1.0,
+      "lsh_s": 0.021732626000357413,
+      "lsh_recall": 1.0,
+      "C_candidates": 126
+    },
+    {
+      "N": 4096,
+      "dense_s": 0.026066845000059402,
+      "dense_recall": 1.0,
+      "lsh_s": 0.05355335099966396,
+      "lsh_recall": 1.0,
+      "C_candidates": 129
+    },
+    {
+      "N": 16384,
+      "dense_s": null,
+      "dense_recall": null,
+      "lsh_s": 0.20545757099989714,
+      "lsh_recall": 1.0,
+      "C_candidates": 129
+    },
+    {
+      "N": 65536,
+      "dense_s": null,
+      "dense_recall": null,
+      "lsh_s": 1.0711203820001174,
+      "lsh_recall": 1.0,
+      "C_candidates": 129
+    },
+    {
+      "N": 131072,
+      "dense_s": null,
+      "dense_recall": null,
+      "lsh_s": 2.295152233999943,
+      "lsh_recall": 1.0,
+      "C_candidates": 129
+    }
+  ],
+  "lsh_exponent": 0.9813809201600012,
+  "lsh_min_recall": 1.0,
+  "C_bounded": true
+}

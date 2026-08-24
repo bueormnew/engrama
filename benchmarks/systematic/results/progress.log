@@ -1,0 +1,39 @@
+[20:14:46] === INICIO 4_semantic_tap ===
+[20:16:03] === OK 4_semantic_tap (77.0s) ===
+[20:16:03] === INICIO 5_dense_vs_lsh ===
+[20:16:46] === OK 5_dense_vs_lsh (42.3s) ===
+[20:16:46] === INICIO 6_param_scaling ===
+[20:17:03] === OK 6_param_scaling (17.3s) ===
+[20:17:03] === INICIO 7_context_params ===
+[20:17:06] === OK 7_context_params (3.4s) ===
+[20:17:06] === INICIO 8_parallel_vs_incremental ===
+[20:17:07] !!! ERROR 8_parallel_vs_incremental: The size of tensor a (256) must match the size of tensor b (4096) at non-singleton dimension 2
+[20:17:07] Traceback (most recent call last):
+  File "/home/user/engrama/benchmarks/systematic/run_all.py", line 42, in main
+    m.run()
+  File "/home/user/engrama/benchmarks/systematic/8_parallel_vs_incremental.py", line 93, in run
+    result["by_dtype"]["float32"] = run_for_dtype("float32", Ns_fp32)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/engrama/benchmarks/systematic/8_parallel_vs_incremental.py", line 70, in run_for_dtype
+    diff = (y_par.float() - y_inc.float()).abs()
+            ~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (256) must match the size of tensor b (4096) at non-singleton dimension 2
+
+[20:17:07] === INICIO 9_numeric_stress ===
+[20:17:09] === OK 9_numeric_stress (2.5s) ===
+[20:17:09] === INICIO 10_effective_memory ===
+[20:17:09] !!! ERROR 10_effective_memory: d_semantic debe estar en [1, 4096]
+[20:17:09] Traceback (most recent call last):
+  File "/home/user/engrama/benchmarks/systematic/run_all.py", line 42, in main
+    m.run()
+  File "/home/user/engrama/benchmarks/systematic/10_effective_memory.py", line 43, in run
+    cfg = V55Config(
+          ^^^^^^^^^^
+  File "<string>", line 58, in __init__
+  File "/home/user/engrama/src/engrama/v55/config.py", line 198, in __post_init__
+    raise ValueError("d_semantic debe estar en [1, 4096]")
+ValueError: d_semantic debe estar en [1, 4096]
+
+[20:17:09] === INICIO 11_interference ===
+[20:17:11] === OK 11_interference (1.8s) ===
+[20:17:11] TODAS LAS PRUEBAS TERMINADAS

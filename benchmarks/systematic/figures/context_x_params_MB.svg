@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" font-family="Helvetica,Arial,sans-serif" style="background:#fff">
+<text x="360.0" y="30" text-anchor="middle" font-size="17" font-weight="bold">Prueba 7 — Memoria total MB (paralelo, recall denso)</text>
+<rect x="100.0" y="246.7" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="173.8" y="297.3" text-anchor="middle" font-size="11" fill="#000">617</text>
+<rect x="247.5" y="246.7" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="321.2" y="297.3" text-anchor="middle" font-size="11" fill="#000">8806</text>
+<rect x="395.0" y="246.7" width="147.5" height="93.3" fill="rgb(212,65,60)" stroke="#fff" stroke-width="1"/>
+<text x="468.8" y="297.3" text-anchor="middle" font-size="11" fill="#000">138200</text>
+<rect x="542.5" y="246.7" width="147.5" height="93.3" fill="rgb(93,139,60)" stroke="#fff" stroke-width="1"/>
+<text x="616.2" y="297.3" text-anchor="middle" font-size="11" fill="#000">2201961</text>
+<rect x="100.0" y="153.3" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="173.8" y="204.0" text-anchor="middle" font-size="11" fill="#000">686</text>
+<rect x="247.5" y="153.3" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="321.2" y="204.0" text-anchor="middle" font-size="11" fill="#000">8940</text>
+<rect x="395.0" y="153.3" width="147.5" height="93.3" fill="rgb(212,65,60)" stroke="#fff" stroke-width="1"/>
+<text x="468.8" y="204.0" text-anchor="middle" font-size="11" fill="#000">138591</text>
+<rect x="542.5" y="153.3" width="147.5" height="93.3" fill="rgb(93,139,60)" stroke="#fff" stroke-width="1"/>
+<text x="616.2" y="204.0" text-anchor="middle" font-size="11" fill="#000">2203384</text>
+<rect x="100.0" y="60.0" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="173.8" y="110.7" text-anchor="middle" font-size="11" fill="#000">1151</text>
+<rect x="247.5" y="60.0" width="147.5" height="93.3" fill="rgb(219,60,60)" stroke="#fff" stroke-width="1"/>
+<text x="321.2" y="110.7" text-anchor="middle" font-size="11" fill="#000">13564</text>
+<rect x="395.0" y="60.0" width="147.5" height="93.3" fill="rgb(208,67,59)" stroke="#fff" stroke-width="1"/>
+<text x="468.8" y="110.7" text-anchor="middle" font-size="11" fill="#000">208170</text>
+<rect x="542.5" y="60.0" width="147.5" height="93.3" fill="rgb(30,180,60)" stroke="#fff" stroke-width="1"/>
+<text x="616.2" y="110.7" text-anchor="middle" font-size="11" fill="#000">3305875</text>
+<text x="173.8" y="360.0" text-anchor="middle" font-size="11">1K</text>
+<text x="321.2" y="360.0" text-anchor="middle" font-size="11">4K</text>
+<text x="468.8" y="360.0" text-anchor="middle" font-size="11">16K</text>
+<text x="616.2" y="360.0" text-anchor="middle" font-size="11">66K</text>
+<text x="92" y="297.3" text-anchor="end" font-size="11">10M</text>
+<text x="92" y="204.0" text-anchor="end" font-size="11">30M</text>
+<text x="92" y="110.7" text-anchor="end" font-size="11">100M</text>
+<text x="395.0" y="395" text-anchor="middle" font-size="13">N contexto</text>
+<text x="25" y="200.0" text-anchor="middle" font-size="13" transform="rotate(-90 25,200.0)">modelo</text>
+</svg>

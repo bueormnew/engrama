@@ -1,0 +1,34 @@
+{
+  "test": "v6_interference",
+  "rows": [
+    {
+      "N": 8,
+      "A_to_Q": true,
+      "B_to_Y": true,
+      "C_to_Z": true,
+      "no_contamination": true
+    },
+    {
+      "N": 18,
+      "A_to_Q": true,
+      "B_to_Y": true,
+      "C_to_Z": true,
+      "no_contamination": true
+    },
+    {
+      "N": 108,
+      "A_to_Q": true,
+      "B_to_Y": true,
+      "C_to_Z": true,
+      "no_contamination": true
+    },
+    {
+      "N": 1008,
+      "A_to_Q": true,
+      "B_to_Y": true,
+      "C_to_Z": true,
+      "no_contamination": true
+    }
+  ],
+  "all_no_contamination": true
+}
